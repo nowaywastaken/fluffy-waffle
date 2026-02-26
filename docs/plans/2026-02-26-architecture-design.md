@@ -1038,7 +1038,7 @@ tools:
   - name: "git.diff"
     description: "Show changes between working tree and HEAD"
     # ... full ToolDefinition
-min_kernel_version: "0.1.0"
+min_api_version: 1
 ```
 
 ### Plugin Registry
@@ -1081,7 +1081,36 @@ At registration, kernel pre-checks whether policy would allow the plugin's `requ
 
 ### Version Compatibility
 
-Kernel checks `min_kernel_version` against current version. Syscall interface carries a version number; kernel supports the latest 2 versions. Plugins older than 2 versions must update.
+Syscall API uses a monotonically increasing integer version (not semver -- the interface is simple enough).
+
+**Version negotiation** occurs during IPC handshake at connection establishment:
+
+```typescript
+interface HandshakeRequest {
+  type: "handshake";
+  plugin_name: string;
+  plugin_version: string;
+  syscall_api_version: number;    // integer, monotonically increasing
+}
+
+interface HandshakeResponse {
+  type: "handshake_ack";
+  kernel_version: string;
+  supported_api_versions: [number, number];  // [min, max], always 2 consecutive
+  negotiated_api_version: number;
+}
+```
+
+Kernel supports `[current, current-1]` -- the latest 2 versions. If plugin's requested version is outside this range, connection is rejected with a structured error indicating required version range.
+
+**Breaking change definition**:
+- Delete or rename a syscall -> breaking
+- Modify required fields of syscall parameters -> breaking
+- Add optional parameters -> non-breaking
+- Modify return value structure -> breaking
+- Add new syscall -> non-breaking
+
+Version changes are recorded in CHANGELOG.md with breaking/non-breaking annotations. Plugin manifest uses `min_api_version: number` (replacing `min_kernel_version`).
 
 ### Plugin Identity and Security
 
@@ -1310,18 +1339,26 @@ Phase 7: Commit
 |----------|--------|-----------|
 | Architecture | Layered kernel | Strongest security model with clear separation of concerns |
 | Boundary enforcement | Container isolation + IPC | Only reliable hard boundary in pure software |
+| Container nesting | Sibling containers via host socket | Avoids Docker-in-Docker issues while maintaining logical layering |
+| Container requirement | Hard dependency, no fallback | Security model requires container isolation; Windows uses WSL2 |
 | Policy default | Default-deny | Zero-trust requires explicit authorization |
 | Policy language | YAML + TypeScript | Declarative for common cases, programmable for edge cases |
-| TDD enforcement | State machine guards | System-level enforcement, not prompt-level suggestion |
-| Container pooling | Image pre-caching | Container pooling infeasible (no post-creation mount) |
+| TDD enforcement | State machine guards + exemption whitelist | System-level enforcement with explicit exemptions for non-code changes |
+| Tech debt control | Coverage-based monitoring | Prevents gaming with trivial tests; coverage cannot be faked |
+| Container pooling | Image pre-caching + volume pool | Container pooling infeasible (no post-creation mount) |
 | Network isolation | Application-layer proxy | Safer than IP-layer rules, no DNS issues |
-| Context management | Conservative (all tools visible) | Avoids "AI doesn't know what it doesn't know" problem |
+| Integration tests | Separate network sandbox (standard-net) | Default sandbox prohibits network; integration tests opt-in via policy |
+| Context management | Tools: conservative. History: sliding window + summary | Avoids "AI doesn't know what it doesn't know" + manages token budget |
 | Tool write path | Always through sandbox | Preserves "all writes isolated" invariant |
+| Tool output | Patch mode default, full-file fallback | Avoids full-file copy + diff for known changes |
 | Audit write | Sync for security events, async for operational | Balances integrity with performance |
 | Plugin communication | No direct inter-plugin (v1) | Minimizes attack surface |
 | Plugin installation | Local path only (v1) | Central registry security model too complex for v1 |
+| Plugin versioning | Integer API version + handshake negotiation | Simple, unambiguous, supports 2-version compatibility window |
 | Refactoring workflow | Use explore mode | Avoids state machine complexity for v1 |
-| IPC protocol | Unix socket | SO_PEERCRED identity verification, low latency, no cert management |
+| IPC transport | Platform-abstracted (Unix socket / Named Pipe) | Cross-platform identity verification with unified interface |
+| IPC wire format | Length-prefixed JSON | Debuggable, acceptable overhead (~1-3ms), extensible framing |
+| Error recovery | Idempotent retry + per-scenario checkpoints | Minimal complexity; containers are stateless, SQLite uses snapshots |
 | Storage | SQLite WAL | Single file, no external dependencies, concurrent read/write |
 
 ## Out of Scope for v1
@@ -1329,7 +1366,8 @@ Phase 7: Commit
 - Central plugin registry (requires supply chain security model)
 - Distributed/multi-machine deployment (requires gRPC, mTLS)
 - Cryptographic tamper-proofing (requires TPM or remote trust anchor)
-- Custom seccomp profiles (two predefined profiles cover all scenarios)
+- Custom seccomp profiles (three predefined profiles + standard-net cover all scenarios)
 - Inter-plugin direct communication
 - Dynamic priority scheduling (fixed priority + starvation prevention suffices)
 - Layer 2 on-demand tool context loading (conservative strategy sufficient)
+- Container-less degradation mode (container runtime is a hard dependency)
