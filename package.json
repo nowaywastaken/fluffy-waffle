@@ -1,0 +1,39 @@
+{
+  "name": "fluffy-waffle",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "**Goal**: Develop a vendor-agnostic AI programming command-line tool based on the zero-trust model and containerization technology.",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/bootstrap/index.js",
+    "start:kernel": "node dist/kernel/index.js",
+    "test:ipc": "node --experimental-strip-types src/scripts/test-ipc.ts",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nowaywastaken/fluffy-waffle.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/nowaywastaken/fluffy-waffle/issues"
+  },
+  "homepage": "https://github.com/nowaywastaken/fluffy-waffle#readme",
+  "devDependencies": {
+    "@types/node": "^25.3.1",
+    "@types/picomatch": "^4.0.2",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "anthropic": "^0.0.0",
+    "openai": "^6.25.0",
+    "picomatch": "^4.0.3"
+  }
+}

@@ -1,0 +1,46 @@
+# L1 Kernel Container
+# Acts as the workspace environment and orchestrator for L2 sandboxes.
+
+FROM node:22-slim
+
+# Install Container Runtime Client (Docker CLI)
+# Note: We don't need the daemon, just the client to talk to the host socket.
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    curl \
+    gnupg \
+    && install -m 0755 -d /etc/apt/keyrings \
+    && curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg \
+    && chmod a+r /etc/apt/keyrings/docker.gpg \
+    && echo \
+      "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian \
+      $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
+      tee /etc/apt/sources.list.d/docker.list > /dev/null \
+    && apt-get update \
+    && apt-get install -y docker-ce-cli \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create non-root user for Kernel process
+# Note: Kernel runs as non-root, but has access to Docker socket (group 0 or specific group)
+# In dev container, we often run as root or map user. For production L1, we should be strict.
+# For now, let's keep it simple: run as node user, but ensure it can access the mounted socket.
+# (Socket permissions are usually managed by group on the host, which is tricky in containers)
+# Strategy: We'll assume the socket is mounted with permissions that allow the container user to read/write.
+
+WORKDIR /app
+
+# Copy package files
+COPY package.json package-lock.json tsconfig.json ./
+
+# Install dependencies
+RUN npm ci
+
+# Copy source
+COPY src ./src
+
+# Build TypeScript
+RUN npm run build
+
+# Default command: Start the Kernel
+# (We need to implement a Kernel entry point first, for now just a placeholder)
+CMD ["node", "dist/kernel/index.js"]

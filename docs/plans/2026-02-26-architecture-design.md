@@ -16,9 +16,11 @@ Fluffy Waffle is a vendor-agnostic AI programming CLI tool built on a zero-trust
 
 - **Language**: TypeScript
 - **Policy sandbox runtime**: Deno (for fine-grained permission control)
-- **Container runtime**: Docker/Podman (abstracted via ContainerRuntime interface)
+- **Container runtime**: Docker/Podman (abstracted via ContainerRuntime interface). Hard dependency -- no fallback mode without container runtime.
 - **Storage**: SQLite (WAL mode) for audit log, state machine, sessions
-- **IPC**: Unix socket with `SO_PEERCRED` identity verification
+- **IPC**: Platform-abstracted transport -- Unix socket (Linux/macOS) or Named Pipe (Windows). Identity verification via `SO_PEERCRED` (Linux), `LOCAL_PEERCRED` (macOS), or `GetNamedPipeClientProcessId` (Windows).
+- **IPC wire format**: Length-prefixed JSON over transport (4-byte uint32 BE payload length + UTF-8 JSON payload)
+- **Supported platforms**: Linux, macOS, Windows (via WSL2 + Docker Desktop)
 - **License**: MIT
 
 ## Trust Model
@@ -85,11 +87,30 @@ All security analysis starts from "what happens when a component OUTSIDE the TCB
 Bootstrap exists outside the kernel. Its sole responsibilities:
 
 1. Read configuration
-2. Start the kernel container (L1)
-3. Health check (ping/pong)
-4. Restart kernel on crash
+2. Detect container runtime availability (exit with platform-specific install guide if missing)
+3. Start the kernel container (L1)
+4. Health check (ping/pong)
+5. Restart kernel on crash (max 3 restarts per 5 minutes, then exit with error)
 
 Code budget: < 500 LOC. No IPC message handling, no business data parsing, no network ports. If bootstrap code exceeds this budget, responsibilities have leaked.
+
+**500 LOC budget allocation**:
+```
+Configuration reading:     ~80 LOC   (env vars + single YAML file, no validation)
+Container runtime detect:  ~40 LOC   (OS detection, runtime check, error message)
+Container startup:         ~120 LOC  (docker/podman CLI wrapper, hardcoded security flags)
+Health check:              ~60 LOC   (ping/pong over transport, retry loop)
+Crash recovery:            ~80 LOC   (restart counter + backoff + max retries)
+Entry point + CLI parsing: ~60 LOC   (minimal arg parsing, no framework)
+Error reporting:           ~60 LOC   (structured error output to stderr)
+```
+
+Key constraints to stay within budget:
+- Configuration validation is NOT done in Bootstrap; Kernel validates after startup
+- Container security flags are hardcoded constant arrays, not dynamically assembled
+- Health check only does ping/pong, no business data parsing
+- Crash recovery only handles restart counting and exit decisions; state recovery is Kernel's responsibility
+- No third-party libraries (pure Node.js stdlib + child_process)
 
 ### Container Layers
 
@@ -98,16 +119,33 @@ Code budget: < 500 LOC. No IPC message handling, no business data parsing, no ne
 - Project directory mounted read-write
 - Network access (policy-restricted)
 - Kernel process runs here
+- Host container runtime socket mounted read-only (e.g. `/var/run/docker.sock`)
 - Lifetime = one development session
 
 **L2 (Execution Sandbox)**:
-- AI operation sandbox, nested inside L1
+- AI operation sandbox, created as sibling containers (not nested Docker-in-Docker)
+- L1 kernel creates L2 containers via the host's container runtime socket
+- L2 containers share the host's container runtime but are isolated via mount config and seccomp
 - Project directory mounted read-only; output written to temporary volume
 - No network access (unless policy explicitly allows via application-layer proxy)
 - Lifetime = single operation or atomic operation group
 - Output reviewed before merging back to L1
+- L2 containers have NO access to the container runtime socket (seccomp + mount restriction)
+
+**Sibling container model**: L2 containers are logically "nested inside L1" in the architecture diagram, but physically they are sibling containers managed by the same host container runtime. This avoids Docker-in-Docker storage driver conflicts and permission model complexity while maintaining the security boundary. Only the kernel process in L1 can create/manage L2 containers.
 
 Security boundary: L2 cannot modify L1's filesystem. It can only produce diffs. Merge action is performed by the kernel in L1, after policy check.
+
+### Container Runtime Requirement
+
+Container runtime (Docker or Podman) is a hard dependency. No degradation mode is provided without it.
+
+- Bootstrap checks container runtime availability at startup
+- If unavailable, Bootstrap exits with a structured error including platform-specific installation instructions:
+  - Linux: `apt install docker.io` / `dnf install podman`
+  - macOS: `brew install --cask docker`
+  - Windows: WSL2 setup guide + Docker Desktop installation
+- Windows users must use WSL2 + Docker Desktop. Native Windows containers are not supported.
 
 ## Security Policy Module
 
@@ -198,21 +236,78 @@ capabilities:
 
 **TypeScript extension layer** (covers remaining 10%):
 
-Executed in a dedicated long-running Deno L2 sandbox with `--allow-read=/run/fluffy/policy.sock --allow-write=/run/fluffy/policy.sock`. Pre-loaded at kernel startup. Timeout per evaluation: 100ms. If sandbox crashes, fallback to default-deny.
+Executed in a dedicated long-running Deno L2 sandbox with `--allow-read=/run/fluffy/policy.sock --allow-write=/run/fluffy/policy.sock`. Pre-loaded at kernel startup with a warmup evaluation call to eliminate JIT cold-start latency. Timeout per evaluation: 100ms (excludes startup time, which is amortized at kernel boot). If sandbox crashes, fallback to default-deny.
 
 ### Capability System
 
 **Capability Token** (short-term, operation-level):
-- Bound to `(container_id, l1_pid)` pair
+- Bound to `(container_id, peer_pid)` pair
 - Scoped: syscall type + path glob + maxOps + TTL (default 30s)
 - Contains monotonic nonce for replay prevention
-- Validated via `SO_PEERCRED` matching
+- Validated via platform-specific peer identity verification (see IPC Transport Abstraction below)
 - Bypasses YAML and Extension rules; built-in rules always execute
 
 **Capability Tag** (long-term, identity-level):
 - Attached to PluginIdentity at registration
 - Represents trust level: `core_plugin`, `trusted_write`, `third_party`
 - Visible in all evaluation paths (match and except conditions)
+
+### IPC Transport Abstraction
+
+Platform-specific transport layer for kernel-plugin communication:
+
+```typescript
+interface PeerIdentity {
+  pid: number;
+  uid: number;
+}
+
+interface IpcConnection {
+  send(message: IpcMessage): Promise<void>;
+  receive(): AsyncIterable<IpcMessage>;
+  close(): Promise<void>;
+}
+
+interface IpcTransport {
+  listen(path: string): AsyncIterable<IpcConnection>;
+  connect(path: string): Promise<IpcConnection>;
+  getPeerIdentity(conn: IpcConnection): Promise<PeerIdentity>;
+}
+```
+
+Platform implementations:
+- **Linux**: `SO_PEERCRED` on Unix domain socket
+- **macOS**: `LOCAL_PEERCRED` on Unix domain socket
+- **Windows**: Named Pipe with `GetNamedPipeClientProcessId()`
+
+All three platforms provide process-level identity verification. Capability Token binding uses `(container_id, peer_pid)` uniformly across platforms.
+
+### IPC Wire Protocol
+
+Length-prefixed JSON frames over the platform transport:
+
+```
+Frame: [4 bytes: payload length (uint32 BE)] [payload: UTF-8 JSON]
+```
+
+```typescript
+interface IpcMessage {
+  id: string;           // request-response correlation (UUIDv4)
+  type: "request" | "response" | "event";
+  method?: string;      // for request: syscall name
+  params?: unknown;     // for request: syscall arguments
+  result?: unknown;     // for response: success result
+  error?: IpcError;     // for response: error
+}
+
+interface IpcError {
+  code: string;         // machine-readable error code
+  message: string;      // human-readable description
+  retryable: boolean;
+}
+```
+
+Design rationale: JSON chosen over binary formats for debuggability. Serialization overhead (~1-3ms) is acceptable within the 50ms tool call budget. Length-prefix framing avoids JSON boundary parsing issues. Frame header can be extended with a content-type field for future encoding changes.
 
 ### Built-in Rules (hardcoded, max 10)
 
@@ -335,7 +430,8 @@ interface SandboxConfig {
 
 **Seccomp profiles**:
 - `strict`: Basic computation + IPC only (read, write, close, mmap, futex, socket AF_UNIX, etc.). No fork, no process spawning, no network sockets. For policy sandbox and AI provider.
-- `standard`: Additionally allows fork, clone (no CLONE_NEWUSER/CLONE_NEWNS), execve, open, unlink, mkdir, pipe, etc. For code running and test running. Still prohibits ptrace, mount, chroot, setuid, AF_INET/AF_INET6.
+- `standard`: Additionally allows fork, clone (no CLONE_NEWUSER/CLONE_NEWNS), execve, open, unlink, mkdir, pipe, etc. For code running and unit test running. Still prohibits ptrace, mount, chroot, setuid, AF_INET/AF_INET6.
+- `standard-net`: Same as `standard` but additionally allows AF_INET/AF_INET6. For integration tests that require network access. Network traffic is still routed through the application-layer proxy and subject to host whitelist policy.
 
 File path access control is provided by container mount configuration, NOT by seccomp (seccomp cannot filter path strings).
 
@@ -346,6 +442,10 @@ File path access control is provided by container mount configuration, NOT by se
 **code-executor**: network_mode=none, memory=1GiB, cpu=1.0, max_pids=100, max_duration=300s, seccomp=standard
 
 **policy-sandbox**: network_mode=none, memory=128MiB, cpu=0.25, max_pids=5, max_duration=100ms, seccomp=strict
+
+**integration-test**: network_mode=restricted (via application-layer proxy), memory=1GiB, cpu=1.0, max_pids=100, max_duration=300s, seccomp=standard-net, allowed_hosts=[] (from policy.yaml network_whitelist)
+
+The default `test.run` tool uses `code-executor` (no network). Only tests explicitly declared as requiring network access use `integration-test`. Tool plugins declare their sandbox template in the manifest, or specify it dynamically via tool call parameters. Using `integration-test` requires explicit policy authorization (`require_sandbox: integration-test`).
 
 ### Network Isolation: Application-Layer Proxy
 
@@ -381,27 +481,50 @@ interface ContainerRuntime {
 
 The `run` method is denied by default policy. Only allowed in debug mode with require_review.
 
-### Performance: Image Pre-caching (not container pooling)
+### Performance: Image Pre-caching and Latency Optimization
 
 Container pooling (pre-creating containers) is not feasible because Docker/Podman do not support adding bind mounts after container creation.
 
-Instead:
+**Sandbox creation target: 200-300ms**:
 1. Pre-pull all template images at kernel startup (async, non-blocking)
 2. Pre-compile seccomp profiles
-3. Pre-create output volumes
-4. Container creation with cached image: ~200-300ms
+3. Output volume pool: maintain N idle pre-created volumes, assign on sandbox creation to avoid volume creation latency
+4. Container template snapshots: pre-create a stopped container per sandbox template to maximize image layer cache reuse
+5. Parallelization: mount configuration and seccomp loading execute concurrently
 
 If image not ready when sandbox requested: return `{ status: "pending", reason: "image downloading", progress: "45%" }`.
 
+**Tool call overhead target: 50ms** (excluding tool's own execution time):
+```
+IPC round-trip (Unix socket / Named Pipe):  ~1-2ms
+JSON serialize/deserialize:                 ~1-3ms
+Policy evaluation (token fast path):        ~1ms
+Policy evaluation (YAML slow path):         ~5-10ms
+Sandbox routing + dispatch:                 ~2-5ms
+Overhead budget remaining:                  ~30-40ms
+```
+
+- Kernel-native fast path (read-only tools: fs.read, search.grep, etc.): target 5-10ms total, no sandbox overhead
+- Plugin sandbox full path: 50ms is the overhead budget, tool execution time is additional
+- 10 tool calls per round communication overhead: 500ms max
+
 ### Output Extraction and Merge
 
-1. Sandbox writes output to output volume (complete files, not diffs)
-2. Kernel extracts output from volume
-3. Kernel computes diff against project directory (using reliable diff algorithm)
-4. Policy check on merge (auto-merge criteria: tests pass, no sensitive files, diff < threshold)
-5. Human review triggers: sensitive file paths, large diffs, policy rules
-6. Approved: kernel applies diff to project directory. Rejected: output discarded.
-7. Output volume destroyed (new volume created for next sandbox, never reused)
+Dual-mode output strategy:
+
+**Patch mode (default)**: Tool plugin generates unified diff patches directly, writes to output volume. Kernel applies patches without computing diffs. Used for `fs.write` and other known-change operations.
+
+**Full-file mode (fallback)**: When patch generation fails or tool does not support patch output, falls back to complete file + kernel diff computation. Used for `test.run` (output is new content) and similar scenarios.
+
+Tool Plugin SDK declares output mode via `outputMode: "patch" | "full"` in tool definition. Kernel validates patch mode output by applying to an in-memory copy and verifying consistency.
+
+Merge process:
+1. Kernel extracts output from volume (patches or complete files)
+2. For patch mode: apply patches directly. For full-file mode: compute diff against project directory
+3. Policy check on merge (auto-merge criteria: tests pass, no sensitive files, diff < threshold)
+4. Human review triggers: sensitive file paths, large diffs, policy rules
+5. Approved: kernel applies changes to project directory. Rejected: output discarded.
+6. Output volume destroyed (new volume created for next sandbox, never reused)
 
 ### Design Constraints
 
@@ -559,7 +682,9 @@ type StreamEvent =
 
 `tool_executing` and `tool_result` are kernel-emitted events (not from AI provider) for CLI rendering.
 
-### Context Management (v1: Conservative Strategy)
+### Context Management
+
+**Tool context** (v1: Conservative Strategy):
 
 No dynamic/on-demand tool loading in v1. Strategy:
 
@@ -574,6 +699,36 @@ Workflow state communicated via system prompt injection (~30-50 tokens):
 "Workflow state: test_writing. Writable paths: tests/** only.
  Source code modification available after tests pass."
 ```
+
+**Conversation history management**:
+
+Conversation history is the primary token consumer. Managed via sliding window + summary fallback:
+
+```typescript
+interface ConversationContext {
+  system_prompt: string;           // workflow state + tool summaries
+  recent_messages: Message[];      // sliding window: last N turns
+  summary: string;                 // compressed summary of older messages
+  pinned_context: PinnedItem[];    // user-pinned important context
+  token_budget: TokenBudget;
+}
+
+interface TokenBudget {
+  total: number;              // model's context window
+  system_prompt: number;      // ~500-3000 (tools) + ~50 (workflow)
+  summary: number;            // max 2000 tokens for compressed history
+  recent_messages: number;    // remaining budget
+  reserved: number;           // 4000 tokens reserved for AI response
+}
+```
+
+Strategy:
+- **Sliding window**: retain last N turns of complete conversation (N dynamically adjusted based on token budget)
+- **Summary fallback**: messages outside the window are summarized by AI into ~2000 tokens
+- Summary triggered when `recent_messages` token count exceeds 70% of its budget
+- Summary preserves: key decisions, file modification records, test results. Discards: intermediate reasoning
+- **Pinned context**: user can pin important context via `/pin` command, exempt from summary compression
+- Summary generation runs in AI provider sandbox as a lightweight independent request
 
 ### Parallel Tool Call Handling
 
@@ -760,6 +915,45 @@ committing -> idle                  (commit complete)
 
 **Refactoring**: v1 uses explore mode for refactoring (tests already pass, no Red phase needed). No special strict-mode refactoring state.
 
+### TDD Exemption Mechanism
+
+Certain operations cannot meaningfully follow TDD workflow. These require explicit exemption:
+
+```typescript
+type TddExemption =
+  | "config_change"        // .json, .yaml, .toml, .env, Dockerfile, etc.
+  | "type_refactor"        // .d.ts, type-only changes in .ts
+  | "documentation"        // .md, .txt, LICENSE, etc.
+  | "asset_update";        // .png, .svg, .css (non-logic)
+
+interface ExemptionRequest {
+  category: TddExemption;
+  affected_paths: string[];
+  reason: string;
+}
+```
+
+Exemption rules:
+- Exemptions are requested via `workflow.request_exemption` syscall (never automatic)
+- All exemption requests are recorded in the audit log with category, paths, and reason
+- Granted exemptions enter `exploring` state (reusing explore mode flow) but do NOT consume tech debt budget
+- Exemption categories are configured in policy.yaml with customizable file pattern matching:
+
+```yaml
+tdd_exemptions:
+  config_change:
+    path_glob: ["*.json", "*.yaml", "*.toml", "*.env", "Dockerfile", ".github/**"]
+  type_refactor:
+    path_glob: ["*.d.ts"]
+    condition: "type_only_change"   # kernel static analysis confirms no runtime code changes
+  documentation:
+    path_glob: ["*.md", "*.txt", "LICENSE", "CHANGELOG"]
+  asset_update:
+    path_glob: ["*.png", "*.svg", "*.css", "*.scss"]
+```
+
+- If the requested paths do not match any configured glob for the declared category, the exemption is denied and normal TDD flow is required
+
 ### Transition Guards
 
 ```typescript
@@ -788,14 +982,27 @@ SQLite (same database as audit log, separate table). Chain integrity with same m
 
 ### Tech Debt Budget
 
+Coverage-based monitoring replaces fixed commit counting to prevent gaming with trivial tests:
+
 ```yaml
-explore_mode:
-  max_unverified_commits: 5
-  tests_per_budget_point: 1    # write 1 passing test to recover 1 budget point
+tech_debt:
+  coverage:
+    baseline_file: ".fluffy/coverage-baseline.json"
+    min_delta: 0          # coverage must not decrease
+    warning_threshold: -2  # warn if coverage drops > 2%
+    lockout_threshold: -5  # block explore mode if coverage drops > 5%
   lockout_action: block_explore
+  recovery: "strict_mode_with_coverage_gain"
 ```
 
-Budget checked at `exploring -> committing` transition. Budget exhausted -> transition denied, user must switch to strict mode or write tests. Test "passing" confirmed by Validate stage, not self-declared.
+Coverage baseline is automatically updated after each strict mode commit. On explore mode commit:
+- Coverage does not decrease -> allowed
+- Coverage drops > 2% -> warning but allowed
+- Coverage drops > 5% -> explore mode locked, must switch to strict mode and write tests that restore coverage
+
+Coverage is collected by `test.run` tool via `--coverage` flag. Kernel parses standard lcov/istanbul format. Empty tests (`expect(true).toBe(true)`) cannot game this system because they do not increase coverage of production code.
+
+Budget checked at `exploring -> committing` transition. Budget exhausted -> transition denied, user must switch to strict mode or write tests.
 
 ### Session Mode Switching
 
@@ -882,6 +1089,58 @@ Kernel checks `min_kernel_version` against current version. Syscall interface ca
 - Capability tags from manifest, verified by kernel
 - Plugin signing: v1 uses filesystem permissions (plugin directory owned by trusted user). Future: cryptographic signing for central registry plugins.
 - Keys stored in OS keyring (macOS Keychain, Linux kernel keyring/libsecret). Fallback: filesystem with 0600 permissions.
+
+## Error Recovery
+
+Core principle: **idempotent retry as foundation, layered checkpoints per scenario**.
+
+### L1 Container Crash (Kernel Process Down)
+
+- Bootstrap detects crash via health check (ping/pong timeout)
+- Bootstrap restarts L1 container (idempotent retry)
+- Kernel startup recovery sequence:
+  1. `PRAGMA integrity_check` on SQLite database
+  2. Scan and clean up orphan L2 containers and volumes
+  3. Restore most recent session state from SQLite state machine table
+  4. Notify CLI layer to reconnect
+- Uncommitted AI operations are discarded (L2 output volumes destroyed in CLEANUP)
+- Max consecutive restarts: 3 per 5 minutes. Exceeded -> Bootstrap exits with structured error
+
+### SQLite Corruption
+
+- Detected at startup via `PRAGMA integrity_check`
+- WAL checkpoint strategy: every 1000 writes or every 60 seconds, execute `PRAGMA wal_checkpoint(TRUNCATE)`
+- Periodic snapshots: backup SQLite file to `.fluffy/backups/` at each session end, retain last 5 copies
+- Recovery flow:
+  1. Attempt `.recover` command to salvage data
+  2. If failed, roll back to most recent snapshot backup
+  3. Audit log chain integrity break recorded as `audit_chain_break` event
+  4. Worst case: rebuild empty database, lose history but system remains usable
+
+### Output Volume Merge Failure
+
+- Idempotent design: write to temporary path -> atomic `rename`
+- Multi-step merges use an operation log (mini WAL):
+
+```typescript
+interface MergeOperation {
+  id: string;
+  steps: MergeStep[];
+  completed_steps: string[];  // idempotent: skip already completed
+  status: "in_progress" | "completed" | "failed";
+}
+```
+
+- On failure, retry is safe: completed steps are skipped
+- Partial failure: already-merged files are kept, unmerged files reported to user, no automatic rollback
+
+### Kernel OOM
+
+- Defense before container memory_limit triggers OOM killer:
+  - Kernel monitors own memory usage (`process.memoryUsage()`)
+  - At 80% of limit: pause new task scheduling, trigger GC, clear caches
+  - At 90% of limit: force-destroy non-critical L2 containers to release resources
+- If OOM kill occurs: treated as L1 crash, follows Bootstrap restart flow
 
 ## CLI Layer Module
 
