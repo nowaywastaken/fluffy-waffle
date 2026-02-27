@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Container Manager module
+  - ContainerRuntime interface (DockerAdapter via execFileNoThrow, no shell injection)
+  - Sandbox lifecycle state machine with valid-transition enforcement
+  - Four sandbox templates: ai-provider, code-executor, policy-sandbox, integration-test
+  - Three Seccomp profiles with default-deny (strict, standard, standard-net)
+  - Idempotent cleanup (each step independent, failures logged not thrown)
+  - Orphan container scanner on startup (fw-sandbox- prefix)
+  - max_duration timer enforced from host
+  - execFileNoThrow utility (src/utils/)
 - Bootstrap layer implementation with health check and crash recovery
   - Unix socket health check with ping/pong protocol
   - Exponential backoff restart strategy (1s -> 2s -> 4s, max 4s)

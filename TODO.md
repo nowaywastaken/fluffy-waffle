@@ -21,18 +21,18 @@
   - [x] Error reporting (~60 LOC)
 
 ### Container Manager Module
-- [ ] Define ContainerRuntime interface
-- [ ] Implement Docker adapter
+- [x] Define ContainerRuntime interface
+- [x] Implement Docker adapter
 - [ ] Implement Podman adapter
-- [ ] Sandbox lifecycle state machine
-- [ ] Sandbox configuration templates
-  - [ ] ai-provider template
-  - [ ] code-executor template
-  - [ ] policy-sandbox template
-  - [ ] integration-test template
-- [ ] Output volume management
-- [ ] Image pre-caching mechanism
-- [ ] Volume pool for latency optimization
+- [x] Sandbox lifecycle state machine
+- [x] Sandbox configuration templates
+  - [x] ai-provider template
+  - [x] code-executor template
+  - [x] policy-sandbox template
+  - [x] integration-test template
+- [ ] Output volume management  (deferred to v2 - volume pool)
+- [ ] Image pre-caching mechanism  (deferred to v2)
+- [ ] Volume pool for latency optimization  (deferred to v2)
 
 ### IPC Transport Layer
 - [ ] Define IPC interfaces (IpcTransport, IpcConnection, PeerIdentity)
