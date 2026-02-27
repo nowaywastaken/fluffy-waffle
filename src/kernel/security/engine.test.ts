@@ -222,3 +222,42 @@ describe('PolicyEngine — built-in rules', () => {
     assert.strictEqual(await engine.evaluate(ctx), 'deny');
   });
 });
+
+describe('PolicyEngine — token path (cases 7-8)', () => {
+  // Case 7: valid token + built-in deny → deny (token does NOT bypass built-in)
+  it('case 7: valid token + built-in deny → deny', async () => {
+    const issuer = new TokenIssuer();
+    const engine = new PolicyEngine(issuer);
+    const token = issuer.issue({
+      containerId: 'c-100',
+      peerPid: 100,
+      syscall: 'fs.write',
+      pathGlob: ['**/.fluffy/policy.yaml'],
+    });
+    const ctx = makeCtx('fs.write', { path: '.fluffy/policy.yaml' });
+    ctx.token = token;
+    // Built-in deny must fire even with valid token
+    assert.strictEqual(await engine.evaluate(ctx), 'deny');
+  });
+
+  // Case 8: valid token + no built-in issues → allow (bypasses YAML/Extension)
+  it('case 8: valid token, no built-in conflict → allow without YAML', async () => {
+    const issuer = new TokenIssuer();
+    // Extension that would deny if called
+    let extCalled = false;
+    const ext = {
+      async evaluate(_ctx: SyscallContext): Promise<PolicyDecision> {
+        extCalled = true;
+        return 'deny';
+      },
+    };
+    const engine = new PolicyEngine(issuer, ext as any);
+    // No YAML rules; token grants access
+    const token = issuer.issue({ containerId: 'c-100', peerPid: 100, syscall: 'custom.read' });
+    const ctx = makeCtx('custom.read');
+    ctx.token = token;
+    const result = await engine.evaluate(ctx);
+    assert.strictEqual(result, 'allow');
+    assert.strictEqual(extCalled, false, 'Extension must not be called when token is valid');
+  });
+});

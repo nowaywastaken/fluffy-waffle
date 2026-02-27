@@ -1,0 +1,6 @@
+capabilities:
+  - name: "self-defeating-rule"
+    match: { syscall: "fs.write", caller_tag: ["new_employee"] }
+    action: require_review
+    except:
+      - { syscall: "fs.write", caller_tag: ["new_employee"] }
