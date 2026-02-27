@@ -1,0 +1,1 @@
+cmd_Release/peer_cred.node := c++ -bundle -undefined dynamic_lookup -Wl,-search_paths_first -mmacosx-version-min=10.15 -arch arm64 -L./Release -stdlib=libc++  -o Release/peer_cred.node Release/obj.target/peer_cred/peer_cred.o Release/nothing.a 

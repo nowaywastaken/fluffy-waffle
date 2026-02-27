@@ -13,7 +13,8 @@
     "start:kernel": "node dist/kernel/index.js",
     "test:ipc": "node --experimental-strip-types src/scripts/test-ipc.ts",
     "test": "node --experimental-strip-types --test 'src/**/*.test.ts'",
-    "test:container": "node --experimental-strip-types --test src/kernel/container/*.test.ts src/utils/*.test.ts"
+    "test:container": "node --experimental-strip-types --test src/kernel/container/*.test.ts src/utils/*.test.ts",
+    "build:native": "node-gyp configure build --directory native"
   },
   "repository": {
     "type": "git",
@@ -29,6 +30,8 @@
   "devDependencies": {
     "@types/node": "^25.3.1",
     "@types/picomatch": "^4.0.2",
+    "node-addon-api": "^8.5.0",
+    "node-gyp": "^12.2.0",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3"
   },
