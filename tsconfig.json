@@ -41,6 +41,7 @@
     "noUncheckedSideEffectImports": true,
     "moduleDetection": "force",
     "skipLibCheck": true,
+    "rewriteRelativeImportExtensions": true,
   },
   "exclude": ["**/*.test.ts", "dist"]
 }
