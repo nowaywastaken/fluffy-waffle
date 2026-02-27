@@ -2,6 +2,7 @@ import { execSync, spawn } from 'child_process';
 import * as os from 'os';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as net from 'net';
 
 /**
  * Bootstrap Layer (< 500 LOC)
@@ -182,23 +183,46 @@ Options:
   `);
 }
 
-async function startKernel(runtime: string, config: BootstrapConfig) {
-  console.log(`Starting Kernel L1 container using ${runtime}...`);
-  
-  // In a real implementation, this would be a docker run command
-  // For now, we'll just simulate it or prepare the command
-  const args = [
-    'run', '-d',
+function buildStartCommand(runtime: string, config: BootstrapConfig): string[] {
+  return [
+    'run',
+    '-d',
     '--name', 'fluffy-waffle-kernel',
-    '--privileged', // L1 needs to manage L2 containers
-    '-v', `${config.workspaceDir}:/workspace`,
-    '-v', '/var/run/docker.sock:/var/run/docker.sock',
-    config.kernelImage
+    '--rm',
+    ...SECURITY_FLAGS,
+    ...MOUNT_CONFIG(config.workspaceDir),
+    ...NETWORK_CONFIG,
+    ...RESOURCE_LIMITS,
+    config.kernelImage,
   ];
+}
 
-  console.log(`Command: ${runtime} ${args.join(' ')}`);
-  // Since we don't have the image yet, we won't actually run it
-  return true;
+async function startKernel(runtime: string, config: BootstrapConfig): Promise<void> {
+  console.log(`Starting Kernel L1 container using ${runtime}...`);
+
+  const args = buildStartCommand(runtime, config);
+
+  return new Promise((resolve, reject) => {
+    const child = spawn(runtime, args, { stdio: 'pipe' });
+
+    let stderr = '';
+    child.stderr?.on('data', (data) => {
+      stderr += data.toString();
+    });
+
+    child.on('close', (code) => {
+      if (code === 0) {
+        console.log('Container started successfully');
+        resolve();
+      } else {
+        reject(new Error(`Failed to start container (exit code ${code}): ${stderr}`));
+      }
+    });
+
+    child.on('error', (err) => {
+      reject(new Error(`Failed to spawn ${runtime}: ${err.message}`));
+    });
+  });
 }
 
 async function main() {
