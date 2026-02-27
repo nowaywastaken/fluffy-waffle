@@ -12,7 +12,8 @@
     "start": "node dist/bootstrap/index.js",
     "start:kernel": "node dist/kernel/index.js",
     "test:ipc": "node --experimental-strip-types src/scripts/test-ipc.ts",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node --experimental-strip-types --test 'src/**/*.test.ts'",
+    "test:container": "node --experimental-strip-types --test src/kernel/container/*.test.ts src/utils/*.test.ts"
   },
   "repository": {
     "type": "git",
