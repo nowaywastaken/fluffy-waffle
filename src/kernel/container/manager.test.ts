@@ -1,6 +1,6 @@
 import { describe, it, mock } from 'node:test';
 import assert from 'node:assert/strict';
-import { ContainerManager } from './manager_new.ts';
+import { ContainerManager } from './manager.ts';
 import type { ContainerRuntime, SandboxConfig, ContainerState } from './types.ts';
 
 function makeMockRuntime(): ContainerRuntime {
