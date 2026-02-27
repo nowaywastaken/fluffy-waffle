@@ -50,6 +50,28 @@ const DEFAULT_CONFIG: BootstrapConfig = {
   maxRestarts: 3,
 };
 
+const SECURITY_FLAGS = [
+  '--privileged',
+  '--security-opt', 'apparmor=unconfined',
+  '--security-opt', 'seccomp=unconfined',
+  '--cap-add', 'SYS_ADMIN',
+] as const;
+
+const MOUNT_CONFIG = (workspaceDir: string) => [
+  '-v', '/var/run/docker.sock:/var/run/docker.sock:ro',
+  '-v', `${workspaceDir}:/workspace:rw`,
+  '-v', 'fluffy-ipc:/run/fluffy',
+] as const;
+
+const NETWORK_CONFIG = [
+  '--network', 'bridge',
+] as const;
+
+const RESOURCE_LIMITS = [
+  '--memory', '2g',
+  '--cpus', '2',
+] as const;
+
 function parseSimpleYaml(content: string): Record<string, string> {
   const result: Record<string, string> = {};
   const lines = content.split('\n');
