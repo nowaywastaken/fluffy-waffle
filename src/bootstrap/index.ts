@@ -15,6 +15,34 @@ interface BootstrapConfig {
   maxRestarts: number;
 }
 
+interface HealthCheckConfig {
+  socketPath: string;
+  timeout: number;
+  retryInterval: number;
+}
+
+interface RestartState {
+  count: number;
+  timestamps: number[];
+  maxRestarts: number;
+  windowMs: number;
+}
+
+interface StructuredError {
+  level: 'error' | 'warn' | 'info';
+  what: string;
+  why: string;
+  fix: string;
+  context?: string;
+}
+
+interface CliArgs {
+  help: boolean;
+  version: boolean;
+  config?: string;
+  runtime?: string;
+}
+
 const DEFAULT_CONFIG: BootstrapConfig = {
   runtime: process.env.CONTAINER_RUNTIME || 'auto',
   kernelImage: 'fluffy-waffle-kernel:latest',
