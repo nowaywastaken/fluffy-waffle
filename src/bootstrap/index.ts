@@ -276,6 +276,57 @@ async function waitForContainerExit(runtime: string, containerName: string): Pro
   });
 }
 
+async function monitorKernel(runtime: string, config: BootstrapConfig): Promise<void> {
+  const state: RestartState = {
+    count: 0,
+    timestamps: [],
+    maxRestarts: 3,
+    windowMs: 5 * 60 * 1000,
+  };
+
+  while (true) {
+    try {
+      await startKernel(runtime, config);
+
+      await healthCheck({
+        socketPath: '/run/fluffy/kernel.sock',
+        timeout: 30000,
+        retryInterval: 1000,
+      });
+
+      console.log('Kernel started successfully');
+      state.count = 0;
+
+      await waitForContainerExit(runtime, 'fluffy-waffle-kernel');
+
+      console.error('Kernel container exited unexpectedly');
+
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error('Kernel startup failed:', message);
+    }
+
+    if (!shouldRestart(state)) {
+      const error: StructuredError = {
+        level: 'error',
+        what: 'Kernel restart limit exceeded',
+        why: 'Kernel crashed 3 times within 5 minutes',
+        fix: 'Check kernel logs for errors: docker logs fluffy-waffle-kernel',
+        context: `Restart attempts: ${state.timestamps.length}`,
+      };
+      console.error(formatError(error));
+      process.exit(1);
+    }
+
+    const backoff = calculateBackoff(state.count);
+    console.log(`Restarting in ${backoff}ms...`);
+    await sleep(backoff);
+
+    state.count++;
+    state.timestamps.push(Date.now());
+  }
+}
+
 async function startKernel(runtime: string, config: BootstrapConfig): Promise<void> {
   console.log(`Starting Kernel L1 container using ${runtime}...`);
 
@@ -330,10 +381,8 @@ async function main() {
   }
   console.log(`Using runtime: ${runtime}`);
 
-  // 2. Start Kernel
-  await startKernel(runtime, config);
-
-  console.log('Bootstrap phase complete.');
+  // 2. Enter monitor loop
+  await monitorKernel(runtime, config);
 }
 
 main().catch(err => {
