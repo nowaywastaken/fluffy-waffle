@@ -199,6 +199,31 @@ function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+function buildPingFrame(): Buffer {
+  const msg = {
+    id: 'bootstrap-ping-1',
+    type: 'request' as const,
+    method: 'test.ping',
+    params: {},
+  };
+  const payload = Buffer.from(JSON.stringify(msg), 'utf8');
+  const header = Buffer.alloc(4);
+  header.writeUInt32BE(payload.length, 0);
+  return Buffer.concat([header, payload]);
+}
+
+function parsePongFrame(data: Buffer): boolean {
+  if (data.length < 4) return false;
+  const length = data.readUInt32BE(0);
+  if (data.length < 4 + length) return false;
+  try {
+    const msg = JSON.parse(data.subarray(4, 4 + length).toString('utf8'));
+    return msg.type === 'response' && msg.result?.pong === true;
+  } catch {
+    return false;
+  }
+}
+
 async function healthCheck(config: HealthCheckConfig): Promise<boolean> {
   const startTime = Date.now();
 
@@ -220,22 +245,17 @@ async function healthCheck(config: HealthCheckConfig): Promise<boolean> {
     }, 5000);
 
     client.on('connect', () => {
-      const ping = JSON.stringify({ type: 'ping' }) + '\n';
-      client.write(ping);
+      client.write(buildPingFrame());
     });
 
     client.on('data', (data) => {
       clearTimeout(timer);
-      try {
-        const response = JSON.parse(data.toString());
-        if (response.type === 'pong') {
-          client.destroy();
-          resolve(true);
-        } else {
-          reject(new Error('Invalid response'));
-        }
-      } catch (err) {
-        reject(new Error('Failed to parse response'));
+      if (parsePongFrame(data)) {
+        client.destroy();
+        resolve(true);
+      } else {
+        client.destroy();
+        reject(new Error('Invalid pong response'));
       }
     });
 
