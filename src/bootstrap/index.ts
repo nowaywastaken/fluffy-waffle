@@ -5,7 +5,7 @@ import * as path from 'path';
 import * as net from 'net';
 
 /**
- * Bootstrap Layer (< 500 LOC)
+ * Bootstrap Layer (389 LOC / 500 LOC budget)
  * Trust Anchor of the Fluffy Waffle system.
  */
 
