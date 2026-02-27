@@ -1,0 +1,8 @@
+capabilities:
+  - name: "allow-src-read"
+    match: { syscall: "fs.read", path_glob: ["src/**"] }
+    action: allow
+
+  - name: "deny-secrets"
+    match: { syscall: "fs.read", path_glob: [".env", "**/.env"] }
+    action: deny

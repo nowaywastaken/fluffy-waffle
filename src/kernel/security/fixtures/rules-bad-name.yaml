@@ -1,0 +1,3 @@
+capabilities:
+  - match: { syscall: "fs.read" }
+    action: allow
