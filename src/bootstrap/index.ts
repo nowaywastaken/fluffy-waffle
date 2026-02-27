@@ -1,4 +1,4 @@
-import { execSync, spawn } from 'child_process';
+import { spawn, spawnSync } from 'child_process';
 import * as os from 'os';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -100,14 +100,12 @@ function loadConfig(configPath?: string): BootstrapConfig {
   return config;
 }
 
-function detectContainerRuntime(preference: string) {
+function detectContainerRuntime(preference: string): string | null {
   const runtimes = preference === 'auto' ? ['docker', 'podman'] : [preference];
   for (const runtime of runtimes) {
-    try {
-      execSync(`${runtime} --version`, { stdio: 'ignore' });
+    const result = spawnSync(runtime, ['--version'], { stdio: 'ignore' });
+    if (result.status === 0) {
       return runtime;
-    } catch (e) {
-      // Continue
     }
   }
   return null;
