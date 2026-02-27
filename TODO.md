@@ -35,13 +35,13 @@
 - [ ] Volume pool for latency optimization  (deferred to v2)
 
 ### IPC Transport Layer
-- [ ] Define IPC interfaces (IpcTransport, IpcConnection, PeerIdentity)
-- [ ] Implement Unix socket transport (Linux/macOS)
-- [ ] Peer identity verification
-  - [ ] SO_PEERCRED (Linux)
-  - [ ] LOCAL_PEERCRED (macOS)
-- [ ] Length-prefixed JSON wire protocol
-- [ ] IPC message serialization/deserialization
+- [x] Define IPC interfaces (IpcTransport, IpcConnection, PeerIdentity)
+- [x] Implement Unix socket transport (Linux/macOS)
+- [x] Peer identity verification
+  - [x] SO_PEERCRED (Linux)
+  - [x] LOCAL_PEERCRED (macOS)
+- [x] Length-prefixed JSON wire protocol
+- [x] IPC message serialization/deserialization
 
 ---
 

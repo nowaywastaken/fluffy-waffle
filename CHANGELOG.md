@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- IPC Transport Layer with zero-trust peer identity verification
+  - SO_PEERCRED (Linux) / LOCAL_PEERCRED (macOS) via native C++ addon (native/peer_cred.cc)
+  - Zero-trust: reject connection immediately if peer identity cannot be verified
+  - Fail-closed: all connections rejected if native addon is not built/available
+  - Socket file permissions: chmod 600 (owner read/write only, was 700)
+  - Decoupled MessageHandler callback replaces tight Dispatcher coupling
+  - Types extracted to types.ts, ProtocolHandler extracted to protocol.ts
+  - Dispatcher: PolicyEngine dependency removed (deferred to Phase 2), imports fixed
+  - Bootstrap health check migrated to IPC frame format (unified protocol)
 - Container Manager module
   - ContainerRuntime interface (DockerAdapter via execFileNoThrow, no shell injection)
   - Sandbox lifecycle state machine with valid-transition enforcement
