@@ -1,0 +1,4 @@
+capabilities:
+  - name: "bad-action"
+    match: { syscall: "fs.read" }
+    action: unknown_action

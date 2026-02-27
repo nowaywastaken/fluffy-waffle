@@ -1,0 +1,4 @@
+capabilities:
+  - name: "global-deny-test"
+    match: { caller_tag: ["untrusted"] }
+    action: deny
