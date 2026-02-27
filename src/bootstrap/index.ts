@@ -197,6 +197,57 @@ function buildStartCommand(runtime: string, config: BootstrapConfig): string[] {
   ];
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function healthCheck(config: HealthCheckConfig): Promise<boolean> {
+  const startTime = Date.now();
+
+  // Phase 1: Wait for socket file
+  while (!fs.existsSync(config.socketPath)) {
+    if (Date.now() - startTime > config.timeout) {
+      throw new Error('Socket file not created within timeout');
+    }
+    await sleep(config.retryInterval);
+  }
+
+  // Phase 2: Ping/pong
+  const client = net.createConnection(config.socketPath);
+
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      client.destroy();
+      reject(new Error('Ping timeout'));
+    }, 5000);
+
+    client.on('connect', () => {
+      const ping = JSON.stringify({ type: 'ping' }) + '\n';
+      client.write(ping);
+    });
+
+    client.on('data', (data) => {
+      clearTimeout(timer);
+      try {
+        const response = JSON.parse(data.toString());
+        if (response.type === 'pong') {
+          client.destroy();
+          resolve(true);
+        } else {
+          reject(new Error('Invalid response'));
+        }
+      } catch (err) {
+        reject(new Error('Failed to parse response'));
+      }
+    });
+
+    client.on('error', (err) => {
+      clearTimeout(timer);
+      reject(err);
+    });
+  });
+}
+
 async function startKernel(runtime: string, config: BootstrapConfig): Promise<void> {
   console.log(`Starting Kernel L1 container using ${runtime}...`);
 
