@@ -37,11 +37,9 @@
 ### IPC Transport Layer
 - [ ] Define IPC interfaces (IpcTransport, IpcConnection, PeerIdentity)
 - [ ] Implement Unix socket transport (Linux/macOS)
-- [ ] Implement Named Pipe transport (Windows)
 - [ ] Peer identity verification
   - [ ] SO_PEERCRED (Linux)
   - [ ] LOCAL_PEERCRED (macOS)
-  - [ ] GetNamedPipeClientProcessId (Windows)
 - [ ] Length-prefixed JSON wire protocol
 - [ ] IPC message serialization/deserialization
 
@@ -258,3 +256,4 @@
 - Policy engine: 26 normative test cases
 - All write operations must go through L2 sandbox isolation
 - Container runtime is a hard dependency (no fallback mode)
+- Target platforms: Linux, macOS only (Windows dropped)

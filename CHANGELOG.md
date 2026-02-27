@@ -39,7 +39,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Container runtime: Docker/Podman (hard dependency)
 - Storage: SQLite (WAL mode)
 - License: MIT
-- Supported platforms: Linux, macOS, Windows (via WSL2)
+- Supported platforms: Linux, macOS (Windows dropped from v1 scope)
+
+### Removed
+- Windows (WSL2) support dropped from v1 scope
+  - Named Pipe IPC transport removed from roadmap
+  - GetNamedPipeClientProcessId peer identity check removed
+  - execFileNoThrow Windows cmd.exe shim not required
 
 ## [0.0.0] - 2026-02-26
 
