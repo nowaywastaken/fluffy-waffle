@@ -248,6 +248,34 @@ async function healthCheck(config: HealthCheckConfig): Promise<boolean> {
   });
 }
 
+function calculateBackoff(restartCount: number): number {
+  return Math.min(1000 * Math.pow(2, restartCount), 4000);
+}
+
+function shouldRestart(state: RestartState): boolean {
+  const now = Date.now();
+  const windowStart = now - state.windowMs;
+
+  // Clean up timestamps outside window
+  state.timestamps = state.timestamps.filter(t => t > windowStart);
+
+  // Check if limit exceeded
+  if (state.timestamps.length >= state.maxRestarts) {
+    return false;
+  }
+
+  return true;
+}
+
+async function waitForContainerExit(runtime: string, containerName: string): Promise<void> {
+  return new Promise((resolve) => {
+    const child = spawn(runtime, ['wait', containerName]);
+    child.on('close', () => {
+      resolve();
+    });
+  });
+}
+
 async function startKernel(runtime: string, config: BootstrapConfig): Promise<void> {
   console.log(`Starting Kernel L1 container using ${runtime}...`);
 
