@@ -12,7 +12,11 @@ import type {
 } from './types.ts';
 
 export class DockerAdapter implements ContainerRuntime {
-  constructor(private readonly binary: string) {}
+  private readonly binary: string;
+
+  constructor(binary: string) {
+    this.binary = binary;
+  }
 
   async create(config: SandboxConfig): Promise<ContainerId> {
     const seccompPath = await writeSeccompProfile(config.seccomp_profile);
