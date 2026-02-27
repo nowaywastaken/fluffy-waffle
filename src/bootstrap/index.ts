@@ -84,12 +84,12 @@ function parseSimpleYaml(content: string): Record<string, string> {
   return result;
 }
 
-function loadConfig(): BootstrapConfig {
-  const configPath = path.join(process.cwd(), 'fluffy.yaml');
+function loadConfig(configPath?: string): BootstrapConfig {
+  const cfgPath = configPath || path.join(process.cwd(), 'fluffy.yaml');
   let config = { ...DEFAULT_CONFIG };
 
-  if (fs.existsSync(configPath)) {
-    const content = fs.readFileSync(configPath, 'utf8');
+  if (fs.existsSync(cfgPath)) {
+    const content = fs.readFileSync(cfgPath, 'utf8');
     const parsed = parseSimpleYaml(content);
     if (parsed['runtime']) config.runtime = parsed['runtime'];
     if (parsed['kernel_image']) config.kernelImage = parsed['kernel_image'];
@@ -146,6 +146,42 @@ function reportNoRuntime(platform: string): void {
   console.error(formatError(error));
 }
 
+function parseArgs(argv: string[]): CliArgs {
+  const args: CliArgs = { help: false, version: false };
+
+  for (let i = 2; i < argv.length; i++) {
+    const arg = argv[i];
+
+    if (arg === '--help' || arg === '-h') {
+      args.help = true;
+    } else if (arg === '--version' || arg === '-v') {
+      args.version = true;
+    } else if (arg === '--config' || arg === '-c') {
+      args.config = argv[++i];
+    } else if (arg === '--runtime' || arg === '-r') {
+      args.runtime = argv[++i];
+    } else {
+      throw new Error(`Unknown argument: ${arg}`);
+    }
+  }
+
+  return args;
+}
+
+function printHelp(): void {
+  console.log(`
+Fluffy Waffle Bootstrap v0.1.0
+
+Usage: fluffy [options]
+
+Options:
+  -h, --help              Show this help message
+  -v, --version           Show version information
+  -c, --config <path>     Path to config file (default: ./fluffy.yaml)
+  -r, --runtime <name>    Container runtime (docker|podman|auto)
+  `);
+}
+
 async function startKernel(runtime: string, config: BootstrapConfig) {
   console.log(`Starting Kernel L1 container using ${runtime}...`);
   
@@ -168,8 +204,21 @@ async function startKernel(runtime: string, config: BootstrapConfig) {
 async function main() {
   console.log('--- Fluffy Waffle Bootstrap ---');
 
-  const config = loadConfig();
-  
+  const args = parseArgs(process.argv);
+
+  if (args.help) {
+    printHelp();
+    process.exit(0);
+  }
+
+  if (args.version) {
+    console.log('Fluffy Waffle v0.1.0');
+    process.exit(0);
+  }
+
+  const config = loadConfig(args.config);
+  if (args.runtime) config.runtime = args.runtime;
+
   // 1. Detect Runtime
   const runtime = detectContainerRuntime(config.runtime);
   if (!runtime) {
