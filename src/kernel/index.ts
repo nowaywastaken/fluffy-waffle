@@ -1,28 +1,29 @@
-import { PolicyEngine } from './security/policy.js';
-import { IpcServer } from './ipc/transport.js';
-import { ContainerManager } from './container/manager.js';
-import { Dispatcher } from './ipc/dispatcher.js';
+// src/kernel/index.ts
+import { PolicyEngine } from './security/engine.ts';
+import { TokenIssuer } from './security/token.ts';
+import { IpcServer } from './ipc/transport.ts';
+import { Dispatcher } from './ipc/dispatcher.ts';
+import { ContainerManager, DockerAdapter } from './container/index.ts';
 
-async function main() {
+async function main(): Promise<void> {
   console.log('--- Fluffy Waffle Kernel L1 ---');
-  
-  // 1. Initialize Security Policy
-  const policy = new PolicyEngine();
+
+  const tokenIssuer = new TokenIssuer();
+  const policy = new PolicyEngine(tokenIssuer);
   console.log('Security Policy Engine initialized.');
 
-  // 2. Initialize Container Manager
-  const containerManager = new ContainerManager('docker');
+  const runtime = new DockerAdapter();
+  const containerManager = new ContainerManager(runtime);
   console.log('Container Manager initialized.');
 
-  // 3. Initialize Dispatcher
-  const dispatcher = new Dispatcher(policy, containerManager);
-  console.log('Dispatcher initialized.');
-
-  // 4. Start IPC Server
   const socketPath = '/tmp/fluffy-kernel.sock';
   const ipc = new IpcServer(socketPath);
-  ipc.setDispatcher(dispatcher);
-  
+  const dispatcher = new Dispatcher(containerManager);
+  ipc.setHandler(async (msg, ctx, reply) => {
+    const response = await dispatcher.dispatch(msg, ctx);
+    reply(response);
+  });
+
   try {
     await ipc.listen();
     console.log(`Kernel IPC listening on ${socketPath}`);
@@ -31,9 +32,8 @@ async function main() {
     process.exit(1);
   }
 
-  // Keep alive
   console.log('Kernel ready and waiting for connections...');
-  
+
   process.on('SIGINT', async () => {
     console.log('Shutting down...');
     await ipc.close();

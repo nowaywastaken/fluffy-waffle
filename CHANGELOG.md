@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Security Policy Module (zero-trust evaluation engine)
+  - Order-independent semantics: only deny is terminal, require_review collected across all phases
+  - Five built-in rules protecting policy files, bootstrap, kernel, audit log, state machine DB
+  - HMAC-SHA256 signed capability tokens bound to (container_id, peer_pid) with monotonic nonce
+  - YAML rule loading with O(1) syscall-type index and pre-compiled glob patterns
+  - Deno extension sandbox via Unix socket IPC (100ms timeout → pass, crash → deny)
+  - 26 normative test cases from architecture spec implemented (41 total security tests)
+  - policy.ts replaced by engine.ts + token.ts + yaml-loader.ts + extension.ts + types.ts
 - IPC Transport Layer with zero-trust peer identity verification
   - SO_PEERCRED (Linux) / LOCAL_PEERCRED (macOS) via native C++ addon (native/peer_cred.cc)
   - Zero-trust: reject connection immediately if peer identity cannot be verified

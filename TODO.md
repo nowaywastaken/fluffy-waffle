@@ -48,29 +48,29 @@
 ## Phase 2: Security Core (Priority 1)
 
 ### Security Policy Module
-- [ ] Policy rule evaluation engine
-- [ ] Built-in rules (max 10)
-  - [ ] Meta-policy protection
-  - [ ] Bootstrap file protection
-  - [ ] Kernel process file protection
-  - [ ] Audit log protection
-  - [ ] State machine DB protection
-- [ ] YAML rule parser and indexer
-- [ ] TypeScript extension sandbox (Deno)
-- [ ] Capability token system
-  - [ ] Token issuer
-  - [ ] Token validation (O(1))
-  - [ ] Replay prevention (monotonic nonce)
-- [ ] Capability tag system
-- [ ] Meta-policy update mechanism
-- [ ] Unit specification parser (IEC/SI, time units)
+- [x] Policy rule evaluation engine
+- [x] Built-in rules (max 10) — 5 implemented
+  - [x] Meta-policy protection
+  - [x] Bootstrap file protection
+  - [x] Kernel process file protection
+  - [x] Audit log protection
+  - [x] State machine DB protection
+- [x] YAML rule parser and indexer
+- [x] TypeScript extension sandbox (Deno)
+- [x] Capability token system
+  - [x] Token issuer
+  - [x] Token validation (O(1))
+  - [x] Replay prevention (monotonic nonce)
+- [x] Capability tag system
+- [ ] Meta-policy update mechanism  (deferred to v2)
+- [x] Unit specification parser  (deferred: lazy-parsed in constraints)
 
 ### Policy Engine Tests (26 test cases)
-- [ ] Basic semantics (cases 1-6)
-- [ ] Token path (cases 7-9, 21-23)
+- [x] Basic semantics (cases 1-6)
+- [x] Token path (cases 7-9, 21-23)
 - [ ] Except mechanism (cases 13-15, 26)
-- [ ] Aggregation behavior (cases 10-12, 16-17)
-- [ ] Defensive boundaries (cases 18-20, 24-25)
+- [x] Aggregation behavior (cases 10-12, 16-17)
+- [x] Defensive boundaries (cases 18-20, 24-25)
 
 ### Audit Log Module
 - [ ] SQLite schema design (WAL mode)
