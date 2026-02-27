@@ -1,145 +1,78 @@
+// src/kernel/ipc/transport.ts
 import * as net from 'net';
 import * as fs from 'fs';
-import { Dispatcher, type RequestContext } from './dispatcher.js';
+import { getPeerIdentity } from './peer.ts';
+import { ProtocolHandler } from './protocol.ts';
+import type { IpcMessage, PeerIdentity, RequestContext } from './types.ts';
 
-/**
- * IPC Transport Abstraction
- * Handles Unix Domain Socket communication and peer identity verification.
- */
-
-export interface PeerIdentity {
-  pid: number;
-  uid: number;
-  gid: number;
-}
-
-export interface IpcMessage {
-  id: string;
-  type: 'request' | 'response' | 'event';
-  method?: string;
-  params?: unknown;
-  result?: unknown;
-  error?: {
-    code: string;
-    message: string;
-    retryable: boolean;
-  };
-}
+export type MessageHandler = (
+  msg: IpcMessage,
+  ctx: RequestContext,
+  reply: (response: IpcMessage) => void,
+) => Promise<void>;
 
 export class IpcServer {
+  private socketPath: string;
   private server: net.Server;
-  private connections: Set<net.Socket> = new Set();
-  private dispatcher?: Dispatcher;
+  private connections = new Set<net.Socket>();
+  private handler?: MessageHandler;
 
-  constructor(private socketPath: string) {
-    this.server = net.createServer((socket) => this.handleConnection(socket));
+  constructor(socketPath: string) {
+    this.socketPath = socketPath;
+    this.server = net.createServer(sock => this.handleConnection(sock));
   }
 
-  public setDispatcher(dispatcher: Dispatcher) {
-    this.dispatcher = dispatcher;
+  setHandler(handler: MessageHandler): void {
+    this.handler = handler;
   }
 
-  public async listen(): Promise<void> {
-    // Cleanup existing socket
-    if (fs.existsSync(this.socketPath)) {
-      fs.unlinkSync(this.socketPath);
-    }
-
+  async listen(): Promise<void> {
+    if (fs.existsSync(this.socketPath)) fs.unlinkSync(this.socketPath);
     return new Promise((resolve, reject) => {
       this.server.listen(this.socketPath, () => {
-        // Ensure restricted permissions on socket file
-        fs.chmodSync(this.socketPath, '700'); 
+        fs.chmodSync(this.socketPath, '600');
         resolve();
       });
-
-      this.server.on('error', (err) => reject(err));
+      this.server.on('error', reject);
     });
   }
 
-  public async close(): Promise<void> {
-    for (const conn of this.connections) {
-      conn.destroy();
-    }
+  async close(): Promise<void> {
+    for (const conn of this.connections) conn.destroy();
     this.connections.clear();
-    
-    return new Promise((resolve) => {
-      this.server.close(() => resolve());
-    });
+    return new Promise(resolve => this.server.close(() => resolve()));
   }
 
-  private handleConnection(socket: net.Socket) {
-    this.connections.add(socket);
-    const handler = new ProtocolHandler();
+  private handleConnection(socket: net.Socket): void {
+    let peer: PeerIdentity;
+    try {
+      peer = getPeerIdentity(socket);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`IPC: rejected connection — ${msg}`);
+      socket.destroy();
+      return;
+    }
 
-    // Context for this connection (In MVP, we use placeholders)
-    // Real impl: retrieve peer creds
-    const context: RequestContext = {
-      containerId: 'unknown',
-      pluginName: 'unknown-plugin',
-      capabilityTags: ['core_plugin'] // Allow everything for MVP test
+    this.connections.add(socket);
+    const protocol = new ProtocolHandler();
+    const ctx: RequestContext = {
+      containerId: `container-${peer.pid}`,
+      pluginName: 'unknown',
+      capabilityTags: [],
+      peer,
+    };
+    const reply = (response: IpcMessage) => {
+      socket.write(ProtocolHandler.encode(response));
     };
 
-    socket.on('data', async (chunk) => {
-      if (typeof chunk === 'string') {
-        // Should not happen with socket unless setEncoding is called
-        chunk = Buffer.from(chunk);
-      }
-      
-      const messages = handler.handleData(chunk);
-      for (const msg of messages) {
-        if (this.dispatcher) {
-          const response = await this.dispatcher.dispatch(msg, context);
-          const packet = ProtocolHandler.encode(response);
-          socket.write(packet);
-        }
+    socket.on('data', async chunk => {
+      const buf = typeof chunk === 'string' ? Buffer.from(chunk) : chunk;
+      for (const msg of protocol.handleData(buf)) {
+        await this.handler?.(msg, ctx, reply);
       }
     });
-
-    socket.on('close', () => {
-      this.connections.delete(socket);
-    });
-
-    socket.on('error', (err) => {
-      console.error('IPC Connection error:', err);
-    });
-  }
-}
-
-// Helper to implement the framing protocol
-export class ProtocolHandler {
-  private buffer: Buffer = Buffer.alloc(0);
-
-  public handleData(chunk: Buffer): IpcMessage[] {
-    this.buffer = Buffer.concat([this.buffer, chunk]);
-    const messages: IpcMessage[] = [];
-
-    while (true) {
-      if (this.buffer.length < 4) break; // Not enough data for length header
-
-      const length = this.buffer.readUInt32BE(0);
-      
-      if (this.buffer.length < 4 + length) break; // Not enough data for full payload
-
-      const payload = this.buffer.subarray(4, 4 + length);
-      this.buffer = this.buffer.subarray(4 + length);
-
-      try {
-        const json = JSON.parse(payload.toString('utf8'));
-        messages.push(json);
-      } catch (e) {
-        console.error('IPC Parse Error:', e);
-        // In case of error, we might drop this message or close connection
-      }
-    }
-
-    return messages;
-  }
-
-  public static encode(message: IpcMessage): Buffer {
-    const json = JSON.stringify(message);
-    const payload = Buffer.from(json, 'utf8');
-    const header = Buffer.alloc(4);
-    header.writeUInt32BE(payload.length, 0);
-    return Buffer.concat([header, payload]);
+    socket.on('close', () => this.connections.delete(socket));
+    socket.on('error', err => console.error('IPC socket error:', err.message));
   }
 }
