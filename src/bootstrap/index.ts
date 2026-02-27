@@ -121,6 +121,31 @@ function getInstallInstructions(platform: string) {
   }
 }
 
+function formatError(error: StructuredError): string {
+  const lines = [
+    `${error.level.toUpperCase()}: ${error.what}`,
+    `Reason: ${error.why}`,
+    `Fix: ${error.fix}`,
+  ];
+
+  if (error.context) {
+    lines.push(`Context: ${error.context}`);
+  }
+
+  return lines.join('\n');
+}
+
+function reportNoRuntime(platform: string): void {
+  const error: StructuredError = {
+    level: 'error',
+    what: 'No container runtime detected',
+    why: 'Docker or Podman is required but not found in PATH',
+    fix: getInstallInstructions(platform),
+    context: `Platform: ${platform}`,
+  };
+  console.error(formatError(error));
+}
+
 async function startKernel(runtime: string, config: BootstrapConfig) {
   console.log(`Starting Kernel L1 container using ${runtime}...`);
   
@@ -148,8 +173,7 @@ async function main() {
   // 1. Detect Runtime
   const runtime = detectContainerRuntime(config.runtime);
   if (!runtime) {
-    console.error('Error: No container runtime detected.');
-    console.error(getInstallInstructions(os.platform()));
+    reportNoRuntime(os.platform());
     process.exit(1);
   }
   console.log(`Using runtime: ${runtime}`);
