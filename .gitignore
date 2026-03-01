@@ -120,3 +120,18 @@ dist
 
 # Git worktrees
 .worktrees/
+
+# Fluffy Waffle runtime artifacts
+.fluffy/
+*.sock
+*.db-wal
+*.db-shm
+
+# Local sqlite files created during manual runs/tests
+*.db
+
+# Accidental native transpile outputs (keep native/index.ts tracked)
+/native/index.js
+/native/index.js.map
+/native/index.d.ts
+/native/index.d.ts.map

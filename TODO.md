@@ -2,258 +2,126 @@
 
 ## Current Status
 
-**Phase**: Initial Development
-**Mode**: Architecture Implementation
-**Last Updated**: 2026-02-27
+**Phase**: MVP Implementation  
+**Focus**: End-to-end flow (Tool System -> AI Loop -> Orchestrator -> CLI)  
+**Last Updated**: 2026-02-28
 
 ---
 
-## Phase 1: Foundation (Priority 1)
+## Completed Milestones
 
-### Bootstrap Layer
-- [x] Implement bootstrap binary (< 500 LOC budget)
-  - [x] Configuration reading (~80 LOC)
-  - [x] Container runtime detection (~40 LOC)
-  - [x] Container startup logic (~120 LOC)
-  - [x] Health check (ping/pong) (~60 LOC)
-  - [x] Crash recovery mechanism (~80 LOC)
-  - [x] Entry point + CLI parsing (~60 LOC)
-  - [x] Error reporting (~60 LOC)
+### Foundation & Security
+- [x] Bootstrap layer (<500 LOC budget)
+- [x] Container manager (Docker runtime + lifecycle + templates + seccomp profiles)
+- [x] IPC transport (Unix socket + peer identity verification + length-prefixed protocol)
+- [x] Security policy engine (built-in rules + YAML rules + extension sandbox + capability tokens)
 
-### Container Manager Module
-- [x] Define ContainerRuntime interface
-- [x] Implement Docker adapter
-- [ ] Implement Podman adapter
-- [x] Sandbox lifecycle state machine
-- [x] Sandbox configuration templates
-  - [x] ai-provider template
-  - [x] code-executor template
-  - [x] policy-sandbox template
-  - [x] integration-test template
-- [ ] Output volume management  (deferred to v2 - volume pool)
-- [ ] Image pre-caching mechanism  (deferred to v2)
-- [ ] Volume pool for latency optimization  (deferred to v2)
-
-### IPC Transport Layer
-- [x] Define IPC interfaces (IpcTransport, IpcConnection, PeerIdentity)
-- [x] Implement Unix socket transport (Linux/macOS)
-- [x] Peer identity verification
-  - [x] SO_PEERCRED (Linux)
-  - [x] LOCAL_PEERCRED (macOS)
-- [x] Length-prefixed JSON wire protocol
-- [x] IPC message serialization/deserialization
+### Newly Completed (MVP Plan Phases 1-2)
+- [x] Audit Log module (`src/kernel/audit/`)
+  - [x] SQLite WAL schema
+  - [x] SHA-256 hash chain
+  - [x] Buffered write logger (threshold + timer flush)
+  - [x] Integrity verification APIs
+- [x] TDD State Machine module (`src/kernel/state/`)
+  - [x] strict / explore / debug modes
+  - [x] transition guards and invalid transition handling
+  - [x] tool gate checks (`isToolAllowed`)
+  - [x] exempt file and test file pattern logic
+  - [x] SQLite state snapshot store
 
 ---
 
-## Phase 2: Security Core (Priority 1)
+## MVP Critical Decisions (Pending)
 
-### Security Policy Module
-- [x] Policy rule evaluation engine
-- [x] Built-in rules (max 10) — 5 implemented
-  - [x] Meta-policy protection
-  - [x] Bootstrap file protection
-  - [x] Kernel process file protection
-  - [x] Audit log protection
-  - [x] State machine DB protection
-- [x] YAML rule parser and indexer
-- [x] TypeScript extension sandbox (Deno)
-- [x] Capability token system
-  - [x] Token issuer
-  - [x] Token validation (O(1))
-  - [x] Replay prevention (monotonic nonce)
-- [x] Capability tag system
-- [ ] Meta-policy update mechanism  (deferred to v2)
-- [x] Unit specification parser  (deferred: lazy-parsed in constraints)
-
-### Policy Engine Tests (26 test cases)
-- [x] Basic semantics (cases 1-6)
-- [x] Token path (cases 7-9, 21-23)
-- [ ] Except mechanism (cases 13-15, 26)
-- [x] Aggregation behavior (cases 10-12, 16-17)
-- [x] Defensive boundaries (cases 18-20, 24-25)
-
-### Audit Log Module
-- [ ] SQLite schema design (WAL mode)
-- [ ] AuditEntry record format
-- [ ] Chain integrity (SHA-256 hash chain)
-- [ ] Sync/async write strategy
-- [ ] Buffer management (max 100, flush 500ms)
-- [ ] Retention policy implementation
-- [ ] Storage warning system
-- [ ] Chain integrity verification at startup
+- [ ] D1: TDD enforcement strictness final confirmation
+  - [ ] A: Strict
+  - [x] B: Strict + exemptions (current implementation follows this path)
+  - [ ] C: Advisory
+- [ ] D2: CLI rendering strategy final confirmation
+  - [x] A: Raw Node.js ANSI + readline (recommended)
+  - [ ] B: Ink
+- [ ] D3: SQLite backend finalization for audit/state
+  - [x] Current: `node:sqlite` (implemented)
+  - [ ] Evaluate migration to `better-sqlite3` before release
 
 ---
 
-## Phase 3: State Management (Priority 1)
+## Next Up (MVP Path)
 
-### State Machine Module
-- [ ] State and mode definitions
-- [ ] Transition rules
-  - [ ] Strict mode workflow
-  - [ ] Explore mode workflow
-  - [ ] Debug mode workflow
-- [ ] Transition guards
-- [ ] TDD exemption mechanism
-- [ ] Tech debt budget (coverage-based)
-- [ ] Session mode switching
-- [ ] SQLite persistence with chain integrity
+### Phase 3: Tool System (Highest Priority)
+- [ ] Create `src/kernel/tools/types.ts` (ToolDefinition/ToolCallRequest/ToolCallResult/ToolContext)
+- [ ] Create `src/kernel/tools/registry.ts` (register, lookup, AI tool definitions)
+- [ ] Create `src/kernel/tools/router.ts`
+  - [ ] state gate integration (`TddStateMachine.isToolAllowed`)
+  - [ ] policy gate integration (`PolicyEngine.evaluate`)
+  - [ ] audit logging integration (`AuditLogger.log`)
+  - [ ] execution split: `fast_path` vs `sandbox`
+- [ ] Implement built-in tools
+  - [ ] `builtin/fs.ts`: `fs.read`, `fs.write`, `fs.list`, `fs.exists`
+  - [ ] `builtin/search.ts`: `search.grep`, `search.glob`
+  - [ ] `builtin/test.ts`: `test.run`
+  - [ ] `builtin/shell.ts`: `shell.exec`
+- [ ] Add router/tool tests
+  - [ ] tool registration + lookup
+  - [ ] blocked by state machine
+  - [ ] denied by policy
+  - [ ] fast-path success path
+  - [ ] sandbox tool execution path
 
-### Scheduler Module
-- [ ] Task model and priority system
-- [ ] Priority queue (min-heap)
-- [ ] Dependency graph (DAG)
-- [ ] Concurrency limits management
-- [ ] Preemption strategy (pause/destroy)
-- [ ] Event-driven scheduling loop
-- [ ] Starvation prevention
+### Phase 4: AI Loop
+- [ ] Refactor `src/kernel/ai/` unified types + normalizer
+- [ ] Complete OpenAI adapter (stream + tool_call normalization)
+- [ ] Complete Anthropic adapter (stream + tool_call normalization)
+- [ ] Implement `loop.ts` (prompt -> tool calls -> state transitions)
+- [ ] Implement context/token budget management
 
----
+### Phase 5: Kernel Orchestrator
+- [ ] Build orchestrator to connect IPC, tools, state, audit, AI loop
+- [ ] Session lifecycle: create/run/close
+- [ ] Error routing and retry boundaries
 
-## Phase 4: AI Integration (Priority 2)
-
-### AI Tools Module
-- [ ] Tool Router implementation
-- [ ] Kernel-native fast path tools
-  - [ ] fs.read
-  - [ ] search.grep
-  - [ ] search.glob
-  - [ ] fs.list
-  - [ ] fs.exists
-- [ ] AI Provider adapter interface
-- [ ] Provider implementations
-  - [ ] OpenAI adapter
-  - [ ] Anthropic adapter
-  - [ ] Google adapter
-- [ ] Tool call normalization
-- [ ] Streaming support (StreamEvent types)
-- [ ] Context management
-  - [ ] Tool context (conservative strategy)
-  - [ ] Conversation history (sliding window + summary)
-  - [ ] Token budget management
-- [ ] Parallel tool call handling
-- [ ] Output sanitization
-- [ ] Retry strategy
-
-### Tool Plugin SDK
-- [ ] ToolPlugin interface
-- [ ] ToolContext implementation
-- [ ] Plugin sandbox runtime
-- [ ] Tool definition schema
+### Phase 6: CLI (MVP)
+- [ ] `fluffy "<task>"` single-command flow
+- [ ] streaming output rendering
+- [ ] minimal status line and final summary
 
 ---
 
-## Phase 5: Plugin System (Priority 2)
+## Reliability, Testing, Docs (MVP)
 
-### Plugin System Module
-- [ ] Plugin lifecycle state machine
-- [ ] Plugin manifest schema
-- [ ] PluginRegistry implementation
-- [ ] Plugin discovery and scanning
-- [ ] Plugin isolation (L2 sandboxes)
-- [ ] Capability pre-check
-- [ ] Version compatibility negotiation
-- [ ] Plugin identity and security
-
-### Built-in Plugins
-- [ ] fs-tool
-- [ ] search-tool
-- [ ] git-tool
-- [ ] test-tool
+- [ ] Fix existing sandbox-dependent test failures in restricted environments (`ipc/transport`, `security/extension`)
+- [ ] Add end-to-end happy path test:
+  - [ ] prompt -> test file created -> failing test -> code -> passing test -> done
+- [ ] Add audit integrity startup check in kernel boot path
+- [ ] Add minimal operator docs:
+  - [ ] local runbook
+  - [ ] policy + audit quick reference
+  - [ ] troubleshooting for Docker/socket permissions
 
 ---
 
-## Phase 6: CLI Layer (Priority 2)
+## Post-MVP / Future Tasks
 
-### CLI Implementation
-- [ ] Command structure
-- [ ] Interactive mode
-- [ ] Direct task execution mode
-- [ ] Session management commands
-- [ ] Plugin management commands
-- [ ] Configuration commands
-- [ ] Audit commands
-- [ ] Interactive output rendering
-- [ ] Error display standard
-- [ ] Configuration hierarchy
+### v2 Candidate Features
+- [ ] Podman adapter
+- [ ] network proxy + host allowlist
+- [ ] plugin system and plugin SDK
+- [ ] multi-session resume
+- [ ] output volume pool + image pre-cache optimization
+- [ ] meta-policy hot reload
 
----
-
-## Phase 7: Network & Advanced Features (Priority 3)
-
-### Network Isolation
-- [ ] Application-layer HTTP/HTTPS proxy
-- [ ] Unix socket proxy listener
-- [ ] socat TCP-to-Unix forwarding
-- [ ] Host whitelist enforcement
-- [ ] CONNECT tunnel support
-- [ ] Proxy audit logging
-
-### Seccomp Profiles
-- [ ] strict profile (policy sandbox, AI provider)
-- [ ] standard profile (code executor)
-- [ ] standard-net profile (integration tests)
-
-### Output Management
-- [ ] Patch mode implementation
-- [ ] Full-file mode fallback
-- [ ] Merge process
-- [ ] Auto-merge criteria
-- [ ] Human review workflow
+### Long-term Enhancements
+- [ ] central plugin registry
+- [ ] distributed/multi-machine deployment
+- [ ] stronger tamper-evidence model (TPM / remote trust anchor)
+- [ ] dynamic priority scheduler
+- [ ] on-demand L2 context loading
 
 ---
 
-## Phase 8: Error Recovery & Reliability (Priority 3)
+## Engineering Targets
 
-### Error Recovery
-- [ ] L1 container crash recovery
-- [ ] SQLite corruption handling
-- [ ] WAL checkpoint strategy
-- [ ] Periodic snapshot backups
-- [ ] Output volume merge failure recovery
-- [ ] Kernel OOM defense
-- [ ] Orphan resource cleanup
-
----
-
-## Phase 9: Testing & Documentation (Priority 2)
-
-### Testing
-- [ ] Unit tests for all modules
-- [ ] Integration tests
-- [ ] End-to-end scenario tests
-- [ ] Policy engine test suite (26 cases)
-- [ ] Performance benchmarks
-  - [ ] Sandbox creation: 200-300ms target
-  - [ ] Tool call overhead: 50ms target
-
-### Documentation
-- [ ] User guide
-- [ ] Plugin development guide
-- [ ] Policy configuration guide
-- [ ] API reference
-- [ ] Troubleshooting guide
-
----
-
-## Future Enhancements (Out of Scope for v1)
-
-- [ ] Central plugin registry
-- [ ] Distributed/multi-machine deployment
-- [ ] Cryptographic tamper-proofing (TPM/remote trust anchor)
-- [ ] Custom seccomp profiles
-- [ ] Inter-plugin direct communication
-- [ ] Dynamic priority scheduling
-- [ ] Layer 2 on-demand tool context loading
-- [ ] Container-less degradation mode
-
----
-
-## Notes
-
-- Bootstrap LOC budget: < 500 LOC (strictly enforced)
-- Sandbox creation target: 200-300ms
-- Tool call overhead target: 50ms
-- Policy engine: 26 normative test cases
-- All write operations must go through L2 sandbox isolation
-- Container runtime is a hard dependency (no fallback mode)
-- Target platforms: Linux, macOS only (Windows dropped)
+- [ ] Bootstrap LOC budget remains < 500
+- [ ] Sandbox creation target: 200-300ms
+- [ ] Tool call overhead target: <50ms (fast path)
+- [ ] All write operations go through isolated sandbox path

@@ -8,6 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Audit Log module (`src/kernel/audit/`)
+  - SQLite WAL-backed store for append/query/range read APIs
+  - SHA-256 hash-chain utilities (`computeHash`, `verifyChain`, genesis hash)
+  - Buffered audit logger with threshold/timer flush strategy
+  - Integrity verification interface for runtime checks
+  - Initial audit module test coverage (chain/store/logger)
+- TDD State Machine module (`src/kernel/state/`)
+  - Session states: `idle`, `planning`, `test_writing`, `test_running`, `coding`, `done`, `failed`
+  - Session modes: `strict`, `explore`, `debug`
+  - Tool-level gate enforcement (`isToolAllowed`) for TDD workflow control
+  - Test-file and exempt-file path matching rules
+  - Auto-switch to debug mode after consecutive test failures
+  - SQLite-backed session state snapshot store
+  - Initial state module test coverage (machine/store)
 - Security Policy Module (zero-trust evaluation engine)
   - Order-independent semantics: only deny is terminal, require_review collected across all phases
   - Five built-in rules protecting policy files, bootstrap, kernel, audit log, state machine DB
@@ -47,6 +61,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Architecture design document (docs/plans/2026-02-26-architecture-design.md)
 - Project memory system (.claude/projects/-Users-nowaywastaken-codespaces-fluffy-waffle/memory/)
 - Development tracking files (TODO.md, CHANGELOG.md)
+
+### Changed
+- `TODO.md` restructured around MVP critical path and phased delivery
+  - Marked completed milestones (including Audit Log + State Machine)
+  - Consolidated future tasks into MVP vs post-MVP sections
+  - Added pending decision checklist and immediate next implementation priorities
 
 ### Documentation
 - Comprehensive architecture design covering:
