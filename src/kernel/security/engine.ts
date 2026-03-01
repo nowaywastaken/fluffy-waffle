@@ -46,7 +46,7 @@ export class PolicyEngine {
   private builtinRules: CompiledRule[] = [...BUILTIN_RULES];
   private yamlRules = new Map<string, CompiledRule[]>();
   private readonly tokenIssuer: TokenIssuer;
-  private readonly extension?: ExtensionSandboxLike;
+  private readonly extension: ExtensionSandboxLike | undefined;
 
   constructor(tokenIssuer: TokenIssuer, extension?: ExtensionSandboxLike) {
     this.tokenIssuer = tokenIssuer;
@@ -152,6 +152,7 @@ export class PolicyEngine {
     if (!rule.except) return false;
     for (let i = 0; i < rule.except.length; i++) {
       const cond = rule.except[i];
+      if (!cond) continue;
       const pathMatcher = rule._exceptMatchers?.[i];
       if (this.matchesCondition(cond, ctx, pathMatcher)) return true;
     }

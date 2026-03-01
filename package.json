@@ -36,7 +36,7 @@
     "typescript": "^5.9.3"
   },
   "dependencies": {
-    "anthropic": "^0.0.0",
+    "@anthropic-ai/sdk": "^0.78.0",
     "openai": "^6.25.0",
     "picomatch": "^4.0.3",
     "yaml": "^2.8.2"

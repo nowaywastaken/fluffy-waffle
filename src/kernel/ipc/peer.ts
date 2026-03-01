@@ -1,6 +1,6 @@
 // src/kernel/ipc/peer.ts
 import type * as net from 'net';
-import { getPeerCred } from '../../../native/index.ts';
+import { getPeerCred } from './native-peer.ts';
 import type { PeerIdentity } from './types.ts';
 
 export function getPeerIdentity(socket: net.Socket): PeerIdentity {

@@ -1,4 +1,4 @@
-import { AIProviderAdapter } from './adapter.js';
+import type { AIProviderAdapter } from './adapter.js';
 import { OpenAIAdapter } from './adapters/openai.js';
 import { AnthropicAdapter } from './adapters/anthropic.js';
 

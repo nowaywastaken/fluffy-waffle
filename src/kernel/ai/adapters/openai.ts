@@ -1,5 +1,5 @@
 import OpenAI from 'openai';
-import { AIProviderAdapter, ToolDefinition, Message, AIResponse, ToolCall } from '../adapter.js';
+import type { AIProviderAdapter, ToolDefinition, Message, AIResponse, ToolCall } from '../adapter.js';
 
 export class OpenAIAdapter implements AIProviderAdapter {
   name = 'openai';
@@ -33,11 +33,14 @@ export class OpenAIAdapter implements AIProviderAdapter {
         };
       }
       if (msg.role === 'assistant') {
-        return {
+        const assistantMessage: OpenAI.Chat.Completions.ChatCompletionAssistantMessageParam = {
           role: 'assistant',
-          content: msg.content,
-          tool_calls: msg.tool_calls as OpenAI.Chat.Completions.ChatCompletionMessageToolCall[]
+          content: msg.content
         };
+        if (msg.tool_calls && msg.tool_calls.length > 0) {
+          assistantMessage.tool_calls = msg.tool_calls as OpenAI.Chat.Completions.ChatCompletionMessageToolCall[];
+        }
+        return assistantMessage;
       }
       return {
         role: msg.role as 'user' | 'system',
@@ -45,24 +48,37 @@ export class OpenAIAdapter implements AIProviderAdapter {
       };
     });
 
-    const completion = await this.client.chat.completions.create({
+    const request: OpenAI.Chat.Completions.ChatCompletionCreateParams = {
       model: this.model,
-      messages: openaiMessages,
-      tools: openaiTools,
-      tool_choice: openaiTools ? 'auto' : undefined
-    });
+      messages: openaiMessages
+    };
+    if (openaiTools && openaiTools.length > 0) {
+      request.tools = openaiTools;
+      request.tool_choice = 'auto';
+    }
+
+    const completion = await this.client.chat.completions.create(request);
 
     const choice = completion.choices[0];
+    if (!choice) {
+      throw new Error('OpenAI response contained no choices');
+    }
     const message = choice.message;
 
-    return {
-      content: message.content,
-      tool_calls: message.tool_calls as ToolCall[],
-      usage: completion.usage ? {
+    const response: AIResponse = {
+      content: message.content
+    };
+    if (message.tool_calls && message.tool_calls.length > 0) {
+      response.tool_calls = message.tool_calls as ToolCall[];
+    }
+    if (completion.usage) {
+      response.usage = {
         prompt_tokens: completion.usage.prompt_tokens,
         completion_tokens: completion.usage.completion_tokens,
         total_tokens: completion.usage.total_tokens
-      } : undefined
-    };
+      };
+    }
+
+    return response;
   }
 }

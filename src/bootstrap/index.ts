@@ -156,9 +156,19 @@ function parseArgs(argv: string[]): CliArgs {
     } else if (arg === '--version' || arg === '-v') {
       args.version = true;
     } else if (arg === '--config' || arg === '-c') {
-      args.config = argv[++i];
+      const value = argv[i + 1];
+      if (!value || value.startsWith('-')) {
+        throw new Error(`Missing value for argument: ${arg}`);
+      }
+      args.config = value;
+      i++;
     } else if (arg === '--runtime' || arg === '-r') {
-      args.runtime = argv[++i];
+      const value = argv[i + 1];
+      if (!value || value.startsWith('-')) {
+        throw new Error(`Missing value for argument: ${arg}`);
+      }
+      args.runtime = value;
+      i++;
     } else {
       throw new Error(`Unknown argument: ${arg}`);
     }
@@ -250,7 +260,8 @@ async function healthCheck(config: HealthCheckConfig): Promise<boolean> {
 
     client.on('data', (data) => {
       clearTimeout(timer);
-      if (parsePongFrame(data)) {
+      const buf = typeof data === 'string' ? Buffer.from(data) : data;
+      if (parsePongFrame(buf)) {
         client.destroy();
         resolve(true);
       } else {

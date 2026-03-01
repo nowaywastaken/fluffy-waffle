@@ -78,7 +78,8 @@ export class ExtensionSandbox {
         server.close();
 
         sock.on('data', (chunk) => {
-          for (const msg of protocol.handleData(chunk)) {
+          const buf = typeof chunk === 'string' ? Buffer.from(chunk) : chunk;
+          for (const msg of protocol.handleData(buf)) {
             if (msg.type === 'response') {
               const resolver = this.pending.get(msg.id);
               if (resolver) {

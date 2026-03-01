@@ -14,7 +14,7 @@ import type {
 export class DockerAdapter implements ContainerRuntime {
   private readonly binary: string;
 
-  constructor(binary: string) {
+  constructor(binary: string = 'docker') {
     this.binary = binary;
   }
 

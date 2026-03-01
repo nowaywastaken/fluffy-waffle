@@ -1,5 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { AIProviderAdapter, ToolDefinition, Message, AIResponse, ToolCall } from '../adapter.js';
+import type { AIProviderAdapter, ToolDefinition, Message, AIResponse, ToolCall } from '../adapter.js';
 
 export class AnthropicAdapter implements AIProviderAdapter {
   name = 'anthropic';
@@ -64,13 +64,18 @@ export class AnthropicAdapter implements AIProviderAdapter {
       };
     });
 
-    const response = await this.client.messages.create({
+    const request: Anthropic.MessageCreateParamsNonStreaming = {
       model: this.model,
-      system: systemMessage?.content || undefined,
       messages: anthropicMessages,
-      tools: anthropicTools,
       max_tokens: 4096
-    });
+    };
+    if (systemMessage?.content) {
+      request.system = systemMessage.content;
+    }
+    if (anthropicTools && anthropicTools.length > 0) {
+      request.tools = anthropicTools;
+    }
+    const response = await this.client.messages.create(request);
 
     // Parse response
     let content: string | null = null;
@@ -91,14 +96,17 @@ export class AnthropicAdapter implements AIProviderAdapter {
       }
     }
 
-    return {
+    const result: AIResponse = {
       content,
-      tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
       usage: {
         prompt_tokens: response.usage.input_tokens,
         completion_tokens: response.usage.output_tokens,
         total_tokens: response.usage.input_tokens + response.usage.output_tokens
       }
     };
+    if (toolCalls.length > 0) {
+      result.tool_calls = toolCalls;
+    }
+    return result;
   }
 }

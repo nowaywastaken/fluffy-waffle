@@ -6,7 +6,7 @@ export type RequestHandler = (params: unknown, ctx: RequestContext) => Promise<u
 
 export class Dispatcher {
   private handlers = new Map<string, RequestHandler>();
-  private containerManager?: ContainerManager;
+  private containerManager: ContainerManager | undefined;
 
   constructor(containerManager?: ContainerManager) {
     this.containerManager = containerManager;

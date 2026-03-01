@@ -28,16 +28,18 @@ export class TokenIssuer {
   }
 
   issue(params: IssueParams): CapabilityTokenClaim {
-    const partial = {
+    const partial: Omit<CapabilityTokenClaim, 'signature'> = {
       tokenId: randomUUID(),
       containerId: params.containerId,
       peerPid: params.peerPid,
       syscall: params.syscall,
-      pathGlob: params.pathGlob,
       maxOps: params.maxOps ?? 1,
       expiresAt: Date.now() + (params.ttlMs ?? 30_000),
       nonce: ++this.nonce,
     };
+    if (params.pathGlob) {
+      partial.pathGlob = params.pathGlob;
+    }
     const signature = this.sign(partial);
     this.store.set(partial.tokenId, { ops: 0, revoked: false });
     return { ...partial, signature };

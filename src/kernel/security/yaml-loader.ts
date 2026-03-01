@@ -14,7 +14,10 @@ function compileConditionMatcher(cond: MatchCondition): ((path: string) => boole
 export function compileRule(rule: PolicyRule): CompiledRule {
   const compiled: CompiledRule = { ...rule };
 
-  compiled._pathMatcher = compileConditionMatcher(rule.match);
+  const pathMatcher = compileConditionMatcher(rule.match);
+  if (pathMatcher) {
+    compiled._pathMatcher = pathMatcher;
+  }
 
   if (rule.except) {
     compiled._exceptMatchers = rule.except.map(compileConditionMatcher).map(fn => fn ?? (() => false));
