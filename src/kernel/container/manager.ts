@@ -1,6 +1,13 @@
 import { SandboxLifecycle } from './lifecycle.ts';
 import { buildConfig } from './templates.ts';
-import type { ContainerRuntime, SandboxConfig, SandboxState } from './types.ts';
+import type {
+  ContainerRuntime,
+  SandboxConfig,
+  SandboxState,
+  RunOptions,
+  RunResult,
+  LogOptions,
+} from './types.ts';
 
 async function cleanupSandbox(
   runtime: ContainerRuntime,
@@ -47,8 +54,18 @@ export class ContainerManager {
   }
 
   async destroySandbox(id: string): Promise<void> {
-    this.lifecycle.transition(id, 'stopping');
-    this.lifecycle.transition(id, 'cleanup');
+    const current = this.lifecycle.get(id);
+    if (current === 'destroyed') return;
+
+    if (current === 'creating') {
+      this.lifecycle.transition(id, 'failed');
+    }
+    if (this.lifecycle.get(id) === 'running') {
+      this.lifecycle.transition(id, 'stopping');
+    }
+    if (this.lifecycle.get(id) === 'failed' || this.lifecycle.get(id) === 'stopping') {
+      this.lifecycle.transition(id, 'cleanup');
+    }
     const timer = this.timers.get(id);
     if (timer) {
       clearTimeout(timer);
@@ -61,6 +78,35 @@ export class ContainerManager {
 
   getState(id: string): SandboxState {
     return this.lifecycle.get(id);
+  }
+
+  async pauseSandbox(id: string): Promise<void> {
+    await this.runtime.pause(id);
+  }
+
+  async resumeSandbox(id: string): Promise<void> {
+    await this.runtime.resume(id);
+  }
+
+  async runInSandbox(id: string, command: string[], opts: RunOptions = {}): Promise<RunResult> {
+    return this.runtime.run(id, command, opts);
+  }
+
+  async getLogs(id: string, opts: LogOptions = {}): Promise<string[]> {
+    const lines: string[] = [];
+    for await (const line of this.runtime.logs(id, opts)) {
+      lines.push(line);
+    }
+    return lines;
+  }
+
+  async shutdown(): Promise<void> {
+    const ids = this.lifecycle.active();
+    for (const id of ids) {
+      await this.destroySandbox(id).catch((err: Error) => {
+        console.error(`Failed to destroy sandbox during shutdown (${id}):`, err.message);
+      });
+    }
   }
 
   private setDurationTimer(id: string, maxDuration: number): void {

@@ -143,6 +143,53 @@ export class Dispatcher {
       return { id: p['id'], state: this.containerManager.getState(p['id']) };
     });
 
+    this.register('container.pause', async (params) => {
+      if (!this.containerManager) throw new Error('ContainerManager not available');
+      const p = this.requireObject(params);
+      if (typeof p['id'] !== 'string') throw new Error('container.pause requires string param "id"');
+      await this.containerManager.pauseSandbox(p['id']);
+      return { ok: true };
+    });
+
+    this.register('container.resume', async (params) => {
+      if (!this.containerManager) throw new Error('ContainerManager not available');
+      const p = this.requireObject(params);
+      if (typeof p['id'] !== 'string') throw new Error('container.resume requires string param "id"');
+      await this.containerManager.resumeSandbox(p['id']);
+      return { ok: true };
+    });
+
+    const runHandler = async (params: unknown) => {
+      if (!this.containerManager) throw new Error('ContainerManager not available');
+      const p = this.requireObject(params);
+      if (typeof p['id'] !== 'string') throw new Error('container.exec requires string param "id"');
+      if (!Array.isArray(p['command']) || !p['command'].every(v => typeof v === 'string')) {
+        throw new Error('container.exec requires string[] param "command"');
+      }
+      const opts = this.objectOrEmpty(p['opts']);
+      const timeout = typeof opts['timeout'] === 'number' ? opts['timeout'] : undefined;
+      const stdin = typeof opts['stdin'] === 'string' ? opts['stdin'] : undefined;
+      const runOpts: { timeout?: number; stdin?: string } = {};
+      if (typeof timeout === 'number') runOpts.timeout = timeout;
+      if (typeof stdin === 'string') runOpts.stdin = stdin;
+      return this.containerManager.runInSandbox(p['id'], p['command'] as string[], runOpts);
+    };
+    this.register('container.exec', runHandler);
+    this.register('container.run', runHandler);
+
+    this.register('container.logs', async (params) => {
+      if (!this.containerManager) throw new Error('ContainerManager not available');
+      const p = this.requireObject(params);
+      if (typeof p['id'] !== 'string') throw new Error('container.logs requires string param "id"');
+      const follow = typeof p['follow'] === 'boolean' ? p['follow'] : undefined;
+      const tail = typeof p['tail'] === 'number' ? p['tail'] : undefined;
+      const logOpts: { follow?: boolean; tail?: number } = {};
+      if (typeof follow === 'boolean') logOpts.follow = follow;
+      if (typeof tail === 'number') logOpts.tail = tail;
+      const lines = await this.containerManager.getLogs(p['id'], logOpts);
+      return { lines };
+    });
+
     this.register('session.get', async () => {
       if (!this.stateMachine) return null;
       return this.stateMachine.getState();

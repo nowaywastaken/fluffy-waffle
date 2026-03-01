@@ -4,9 +4,11 @@ import type { AIProviderAdapter, ToolDefinition, Message, AIResponse, ToolCall }
 export class AnthropicAdapter implements AIProviderAdapter {
   name = 'anthropic';
   private client: Anthropic;
+  private model: string;
 
-  constructor(apiKey: string, private model: string = 'claude-3-opus-20240229') {
-    this.client = new Anthropic({ apiKey });
+  constructor(apiKey: string, model: string = 'claude-3-opus-20240229', client?: Anthropic) {
+    this.model = model;
+    this.client = client ?? new Anthropic({ apiKey });
   }
 
   formatTools(tools: ToolDefinition[]): Anthropic.Tool[] {

@@ -1,10 +1,12 @@
 // src/kernel/ipc/dispatcher.test.ts
-import { describe, it } from 'node:test';
+import { describe, it, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Dispatcher } from './dispatcher.ts';
+import { ContainerManager } from '../container/manager.ts';
+import type { ContainerRuntime, ContainerState, SandboxConfig } from '../container/types.ts';
 import { PolicyEngine } from '../security/engine.ts';
 import { TokenIssuer } from '../security/token.ts';
 import { TddStateMachine } from '../state/machine.ts';
@@ -15,6 +17,43 @@ import type { IpcMessage, PeerIdentity, RequestContext } from './types.ts';
 function makeCtx(overrides: Partial<RequestContext> = {}): RequestContext {
   const peer: PeerIdentity = { pid: 100, uid: 501, gid: 20 };
   return { containerId: 'c-100', pluginName: 'test-plugin', capabilityTags: [], peer, ...overrides };
+}
+
+function makeContainerManagerForTest(): {
+  manager: ContainerManager;
+  runtime: ContainerRuntime;
+} {
+  const runtime: ContainerRuntime = {
+    create: mock.fn(async (config: SandboxConfig) => config.container_id),
+    start: mock.fn(async () => {}),
+    stop: mock.fn(async () => {}),
+    kill: mock.fn(async () => {}),
+    remove: mock.fn(async () => {}),
+    inspect: mock.fn(async (): Promise<ContainerState> => ({
+      Status: 'running',
+      Running: true,
+      Pid: 999,
+      ExitCode: 0,
+    })),
+    pause: mock.fn(async () => {}),
+    resume: mock.fn(async () => {}),
+    run: mock.fn(async () => ({
+      stdout: 'ok\n',
+      stderr: '',
+      exitCode: 0,
+    })),
+    logs: mock.fn(async function* () {
+      yield 'log-line-1';
+      yield 'log-line-2';
+    }),
+    createVolume: mock.fn(async (name: string) => name),
+    removeVolume: mock.fn(async () => {}),
+    ping: mock.fn(async () => true),
+  };
+  return {
+    manager: new ContainerManager(runtime),
+    runtime,
+  };
 }
 
 async function call(
@@ -79,6 +118,33 @@ describe('Dispatcher', () => {
     const msg: IpcMessage = { id: '6', type: 'request', method: 'container.create', params: { template: 'ai-provider', config: {} } };
     const response = await dispatcher.dispatch(msg, makeCtx());
     assert.ok(response.error?.message.includes('ContainerManager not available'));
+  });
+
+  it('routes container.pause/resume/exec/logs to ContainerManager', async () => {
+    const { manager, runtime } = makeContainerManagerForTest();
+    const dispatcher = new Dispatcher(manager);
+
+    const paused = await call(dispatcher, 'container.pause', { id: 'sandbox-1' });
+    assert.equal((paused.result as any).ok, true);
+
+    const resumed = await call(dispatcher, 'container.resume', { id: 'sandbox-1' });
+    assert.equal((resumed.result as any).ok, true);
+
+    const execRes = await call(dispatcher, 'container.exec', {
+      id: 'sandbox-1',
+      command: ['echo', 'ok'],
+      opts: { timeout: 300 },
+    });
+    assert.equal((execRes.result as any).exitCode, 0);
+    assert.equal((execRes.result as any).stdout, 'ok\n');
+
+    const logsRes = await call(dispatcher, 'container.logs', { id: 'sandbox-1', tail: 10 });
+    assert.deepEqual((logsRes.result as any).lines, ['log-line-1', 'log-line-2']);
+
+    assert.equal((runtime.pause as ReturnType<typeof mock.fn>).mock.calls.length, 1);
+    assert.equal((runtime.resume as ReturnType<typeof mock.fn>).mock.calls.length, 1);
+    assert.equal((runtime.run as ReturnType<typeof mock.fn>).mock.calls.length, 1);
+    assert.equal((runtime.logs as ReturnType<typeof mock.fn>).mock.calls.length, 1);
   });
 
   it('persists session transitions through session API', async () => {
@@ -149,6 +215,63 @@ describe('Dispatcher', () => {
     });
     assert.equal((res.result as any).allowed, true);
     assert.equal((res.result as any).decision, 'allow');
+  });
+
+  it('tool.authorize enforces state -> policy -> token layering in order', async () => {
+    const issuer = new TokenIssuer();
+    const policy = new PolicyEngine(issuer);
+    const machine = new TddStateMachine({ log: () => {} });
+    const dispatcher = new Dispatcher(undefined, {
+      policyEngine: policy,
+      stateMachine: machine,
+    });
+
+    // Move machine to coding state (where fs.write can pass state gate for source files).
+    machine.submitTask();
+    machine.completePlanning();
+    machine.registerTestFile('tests/flow.test.ts');
+    machine.completeTestWriting();
+    machine.reportTestResult(false);
+
+    // 1) State gate deny has highest precedence: test file writes are blocked in coding.
+    const blockedByState = await call(dispatcher, 'tool.authorize', {
+      tool: 'fs.write',
+      target_path: 'tests/flow.test.ts',
+    });
+    assert.equal((blockedByState.result as any).allowed, false);
+    assert.equal((blockedByState.result as any).layer, 'state');
+
+    // 2) Policy gate can still deny/review even with a valid token.
+    const protectedToken = issuer.issue({
+      containerId: 'c-100',
+      peerPid: 100,
+      syscall: 'fs.write',
+      pathGlob: ['src/kernel/index.ts'],
+    });
+    const blockedByPolicy = await call(dispatcher, 'tool.authorize', {
+      tool: 'fs.write',
+      target_path: 'src/kernel/index.ts',
+      token: protectedToken,
+    });
+    assert.equal((blockedByPolicy.result as any).allowed, false);
+    assert.equal((blockedByPolicy.result as any).layer, 'policy');
+    assert.equal((blockedByPolicy.result as any).decision, 'require_review');
+
+    // 3) Token fast-path allows operation only after state/policy checks pass.
+    const safeToken = issuer.issue({
+      containerId: 'c-100',
+      peerPid: 100,
+      syscall: 'fs.write',
+      pathGlob: ['src/safe.ts'],
+    });
+    const allowed = await call(dispatcher, 'tool.authorize', {
+      tool: 'fs.write',
+      target_path: 'src/safe.ts',
+      token: safeToken,
+    });
+    assert.equal((allowed.result as any).allowed, true);
+    assert.equal((allowed.result as any).layer, 'policy');
+    assert.equal((allowed.result as any).decision, 'allow');
   });
 
   it('token.issue and token.revoke work through IPC handlers', async () => {

@@ -38,6 +38,8 @@ describe('audit/logger', () => {
 
     const rows = store.getEntryRange(1, 2);
     assert.equal(rows.length, 2);
+    assert.equal(rows[0]?.hash_v, 2);
+    assert.equal(rows[1]?.hash_v, 2);
     assert.equal(logger.verifyIntegrity().valid, true);
 
     logger.close();
@@ -81,6 +83,26 @@ describe('audit/logger', () => {
     assert.equal(result.valid, false);
     assert.equal(result.brokenAt, 1);
 
+    logger.close();
+  });
+
+  it('preserves chain integrity under high-frequency buffered writes', () => {
+    const { store, logger } = buildLogger(1000, 500);
+
+    for (let i = 0; i < 300; i++) {
+      logger.log({
+        category: 'tool',
+        action: `stress-${i}`,
+        actor: 'kernel',
+        detail: { i, payload: 'x'.repeat(8) },
+        decision: 'allow',
+      });
+    }
+    logger.flush();
+
+    const rows = store.getEntryRange(1, 300);
+    assert.equal(rows.length, 300);
+    assert.equal(logger.verifyIntegrity(500).valid, true);
     logger.close();
   });
 });

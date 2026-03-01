@@ -1,4 +1,9 @@
-import { execFileNoThrow } from '../../utils/execFileNoThrow.ts';
+import { spawn } from 'node:child_process';
+import {
+  execFileNoThrow,
+  type ExecOptions,
+  type ExecResult,
+} from '../../utils/execFileNoThrow.ts';
 import { writeSeccompProfile } from './seccomp.ts';
 import type {
   ContainerRuntime,
@@ -11,15 +16,27 @@ import type {
   VolumeId,
 } from './types.ts';
 
+interface DockerAdapterDeps {
+  exec?: (command: string, args: string[], options?: ExecOptions) => Promise<ExecResult>;
+  seccompWriter?: (profile: SandboxConfig['seccomp_profile']) => Promise<string>;
+  spawnProc?: typeof spawn;
+}
+
 export class DockerAdapter implements ContainerRuntime {
   private readonly binary: string;
+  private readonly exec: (command: string, args: string[], options?: ExecOptions) => Promise<ExecResult>;
+  private readonly seccompWriter: (profile: SandboxConfig['seccomp_profile']) => Promise<string>;
+  private readonly spawnProc: typeof spawn;
 
-  constructor(binary: string = 'docker') {
+  constructor(binary: string = 'docker', deps: DockerAdapterDeps = {}) {
     this.binary = binary;
+    this.exec = deps.exec ?? execFileNoThrow;
+    this.seccompWriter = deps.seccompWriter ?? writeSeccompProfile;
+    this.spawnProc = deps.spawnProc ?? spawn;
   }
 
   async create(config: SandboxConfig): Promise<ContainerId> {
-    const seccompPath = await writeSeccompProfile(config.seccomp_profile);
+    const seccompPath = await this.seccompWriter(config.seccomp_profile);
     const args = [
       'run', '-d',
       '--name', config.container_id,
@@ -75,27 +92,121 @@ export class DockerAdapter implements ContainerRuntime {
   }
 
   async ping(): Promise<boolean> {
-    const result = await execFileNoThrow(this.binary, ['info', '--format', '{{.ServerVersion}}']);
+    const result = await this.exec(this.binary, ['info', '--format', '{{.ServerVersion}}']);
     return result.status === 0;
   }
 
-  // v1: not implemented
-  pause(_id: ContainerId): Promise<void> {
-    return Promise.reject(new Error('not implemented'));
-  }
-  resume(_id: ContainerId): Promise<void> {
-    return Promise.reject(new Error('not implemented'));
-  }
-  run(_id: ContainerId, _cmd: string[], _opts: RunOptions): Promise<RunResult> {
-    return Promise.reject(new Error('not implemented'));
-  }
-  async *logs(_id: ContainerId, _opts: LogOptions): AsyncIterable<string> {
-    throw new Error('not implemented');
+  async pause(id: ContainerId): Promise<void> {
+    await this.invoke(['pause', id]);
   }
 
-  private async invoke(args: string[]): Promise<string> {
-    const result = await execFileNoThrow(this.binary, args);
-    if (result.status !== 0) throw new Error(result.stderr.trim());
+  async resume(id: ContainerId): Promise<void> {
+    await this.invoke(['unpause', id]);
+  }
+
+  async run(id: ContainerId, command: string[], opts: RunOptions): Promise<RunResult> {
+    if (command.length === 0) {
+      throw new Error('container.run requires a non-empty command');
+    }
+    const args = ['exec', id, ...command];
+    const execOpts: ExecOptions = {};
+    if (typeof opts.stdin === 'string') execOpts.stdin = opts.stdin;
+    if (typeof opts.timeout === 'number') execOpts.timeoutMs = opts.timeout;
+    const result = await this.exec(this.binary, args, execOpts);
+    return {
+      stdout: result.stdout,
+      stderr: result.stderr,
+      exitCode: result.status,
+    };
+  }
+
+  async *logs(id: ContainerId, opts: LogOptions): AsyncIterable<string> {
+    const args = ['logs'];
+    if (typeof opts.tail === 'number') args.push('--tail', String(Math.max(0, opts.tail)));
+    if (opts.follow) args.push('--follow');
+    args.push(id);
+
+    const child = this.spawnProc(this.binary, args, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    const queue: string[] = [];
+    let stdoutBuffer = '';
+    let stderr = '';
+    let done = false;
+    let failure: Error | null = null;
+    let wake: (() => void) | null = null;
+
+    const notify = () => {
+      if (!wake) return;
+      const resolve = wake;
+      wake = null;
+      resolve();
+    };
+
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', (chunk: string) => {
+      stdoutBuffer += chunk;
+      const lines = stdoutBuffer.split(/\r?\n/);
+      stdoutBuffer = lines.pop() ?? '';
+      for (const line of lines) {
+        if (line.length > 0) queue.push(line);
+      }
+      notify();
+    });
+
+    child.stderr.setEncoding('utf8');
+    child.stderr.on('data', (chunk: string) => {
+      stderr += chunk;
+    });
+
+    child.on('error', (err: NodeJS.ErrnoException) => {
+      const message = err.code === 'ENOENT'
+        ? `${this.binary} binary not found`
+        : err.message;
+      failure = new Error(message);
+      done = true;
+      notify();
+    });
+
+    child.on('close', (code) => {
+      if (stdoutBuffer.length > 0) {
+        queue.push(stdoutBuffer);
+        stdoutBuffer = '';
+      }
+      if (code !== 0 && !failure) {
+        const detail = stderr.trim() || `docker logs exited with code ${String(code)}`;
+        failure = new Error(detail);
+      }
+      done = true;
+      notify();
+    });
+
+    try {
+      while (!done || queue.length > 0) {
+        if (queue.length > 0) {
+          yield queue.shift() as string;
+          continue;
+        }
+        await new Promise<void>(resolve => {
+          wake = resolve;
+        });
+      }
+    } finally {
+      if (!done) {
+        child.kill('SIGTERM');
+      }
+    }
+
+    if (failure) throw failure;
+  }
+
+  private async invoke(args: string[], options: ExecOptions = {}): Promise<string> {
+    const result = await this.exec(this.binary, args, options);
+    if (result.status !== 0) {
+      const detail = result.stderr.trim() || `${this.binary} ${args.join(' ')} failed`;
+      throw new Error(detail);
+    }
     return result.stdout;
   }
 }

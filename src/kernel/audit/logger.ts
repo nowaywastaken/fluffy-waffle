@@ -1,5 +1,5 @@
 import { statSync } from 'node:fs';
-import { computeHash, getGenesisHash, verifyChain } from './chain.ts';
+import { computeHashV2, getGenesisHash, verifyChain } from './chain.ts';
 import { AuditStore } from './store.ts';
 import type { AuditCategory, AuditDecision, AuditEntry } from './types.ts';
 
@@ -86,10 +86,11 @@ export class AuditLogger {
             action: item.action,
             actor: item.actor,
             detail: item.detail,
+            hash_v: 2,
             prev_hash: prevHash,
           };
           if (item.decision !== undefined) concrete.decision = item.decision;
-          concrete.hash = computeHash(concrete);
+          concrete.hash = computeHashV2(concrete);
           concreteEntries.push(concrete);
 
           idCursor += 1;

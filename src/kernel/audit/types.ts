@@ -10,6 +10,7 @@ export interface AuditEntry {
   actor: string;
   detail: Record<string, unknown>;
   decision?: AuditDecision | null;
+  hash_v?: 1 | 2;
   prev_hash?: string;
   hash?: string;
 }

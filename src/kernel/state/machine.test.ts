@@ -57,7 +57,7 @@ describe('state/machine', () => {
     assert.equal(machine.getState().state, 'test_writing');
   });
 
-  it('switches to debug mode after three consecutive failures', () => {
+  it('keeps strict mode after three consecutive failures and continues enforcing gates', () => {
     const machine = makeMachine();
     machine.submitTask();
     machine.completePlanning();
@@ -71,11 +71,15 @@ describe('state/machine', () => {
     machine.reportTestResult(false);
 
     const state = machine.getState();
-    assert.equal(state.mode, 'debug');
+    assert.equal(state.mode, 'strict');
     assert.equal(state.consecutive_failures, 3);
 
-    const allowed = machine.isToolAllowed({ tool: 'shell.exec' });
-    assert.equal(allowed.allowed, true);
+    const shellAllowed = machine.isToolAllowed({ tool: 'shell.exec' });
+    assert.equal(shellAllowed.allowed, false);
+    assert.match(shellAllowed.reason ?? '', /coding state/i);
+
+    const writeAllowed = machine.isToolAllowed({ tool: 'fs.write', target_path: 'src/main.ts' });
+    assert.equal(writeAllowed.allowed, true);
   });
 
   it('allows exempt file writes in coding state', () => {

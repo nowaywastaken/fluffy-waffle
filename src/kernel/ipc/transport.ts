@@ -1,6 +1,7 @@
 // src/kernel/ipc/transport.ts
 import * as net from 'net';
 import * as fs from 'fs';
+import * as path from 'path';
 import { getPeerIdentity } from './peer.ts';
 import { ProtocolHandler } from './protocol.ts';
 import type { IpcMessage, PeerIdentity, RequestContext } from './types.ts';
@@ -27,10 +28,10 @@ export class IpcServer {
   }
 
   async listen(): Promise<void> {
-    if (fs.existsSync(this.socketPath)) fs.unlinkSync(this.socketPath);
+    await this.prepareSocketPath();
     return new Promise((resolve, reject) => {
       this.server.listen(this.socketPath, () => {
-        fs.chmodSync(this.socketPath, '600');
+        fs.chmodSync(this.socketPath, 0o600);
         resolve();
       });
       this.server.on('error', reject);
@@ -74,5 +75,56 @@ export class IpcServer {
     });
     socket.on('close', () => this.connections.delete(socket));
     socket.on('error', err => console.error('IPC socket error:', err.message));
+  }
+
+  private async prepareSocketPath(): Promise<void> {
+    const parentDir = path.dirname(this.socketPath);
+    fs.mkdirSync(parentDir, { recursive: true, mode: 0o700 });
+    fs.chmodSync(parentDir, 0o700);
+
+    if (!fs.existsSync(this.socketPath)) return;
+
+    const stat = fs.lstatSync(this.socketPath);
+    if (!stat.isSocket()) {
+      throw new Error(`Refusing to use non-socket path: ${this.socketPath}`);
+    }
+
+    const inUse = await this.isSocketActive();
+    if (inUse) {
+      throw new Error(`Socket path already in use: ${this.socketPath}`);
+    }
+
+    fs.unlinkSync(this.socketPath);
+  }
+
+  private async isSocketActive(): Promise<boolean> {
+    return new Promise((resolve) => {
+      const client = net.createConnection(this.socketPath);
+      let settled = false;
+
+      const settle = (value: boolean): void => {
+        if (settled) return;
+        settled = true;
+        client.destroy();
+        resolve(value);
+      };
+
+      const timer = setTimeout(() => settle(true), 200);
+      timer.unref();
+
+      client.on('connect', () => {
+        clearTimeout(timer);
+        settle(true);
+      });
+
+      client.on('error', (err: NodeJS.ErrnoException) => {
+        clearTimeout(timer);
+        if (err.code === 'ECONNREFUSED' || err.code === 'ENOENT') {
+          settle(false);
+          return;
+        }
+        settle(true);
+      });
+    });
   }
 }

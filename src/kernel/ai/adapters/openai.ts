@@ -4,9 +4,11 @@ import type { AIProviderAdapter, ToolDefinition, Message, AIResponse, ToolCall }
 export class OpenAIAdapter implements AIProviderAdapter {
   name = 'openai';
   private client: OpenAI;
+  private model: string;
 
-  constructor(apiKey: string, private model: string = 'gpt-4o') {
-    this.client = new OpenAI({ apiKey });
+  constructor(apiKey: string, model: string = 'gpt-4o', client?: OpenAI) {
+    this.model = model;
+    this.client = client ?? new OpenAI({ apiKey });
   }
 
   formatTools(tools: ToolDefinition[]): OpenAI.Chat.Completions.ChatCompletionTool[] {

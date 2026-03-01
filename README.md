@@ -43,17 +43,52 @@
 
 ### Phase 6: Containerized kernel runtime ✅
 - Bootstrap starts kernel inside container runtime (`docker` / `podman` detection).
+- Bootstrap and kernel socket paths are now aligned through `FLUFFY_KERNEL_SOCKET`.
+- Host/container IPC now uses a bind-mounted directory (`.fluffy/ipc`) for reliable health checks.
 - Container manager enforces templates, resource limits, and time-based teardown.
+
+## MVP Status (2026-03-01)
+- Core runtime is available: build/test are green, runtime entrypoints are connected, and CLI access is available.
+- Security hardening and test-depth expansion are in progress for production readiness.
+- Container runtime interface (`pause`, `resume`, `run`, `logs`) is exposed through IPC.
+- A user-facing CLI entrypoint (`fluffy` / `fluffy-cli`) is available for kernel RPC and core workflows.
 
 ## Key Runtime IPC Methods
 - Health: `test.ping`
-- Container: `container.create`, `container.destroy`, `container.state`
+- Container: `container.create`, `container.destroy`, `container.state`, `container.pause`, `container.resume`, `container.exec`, `container.logs`
 - Session/TDD: `session.get`, `session.*`
 - Security: `tool.authorize`, `policy.evaluate`, `policy.load_yaml`, `token.issue`, `token.revoke`
 - Audit: `audit.verify`
+
+## CLI (MVP)
+Default socket: `.fluffy/ipc/kernel.sock` under current workspace (override with `--socket` or `FLUFFY_KERNEL_SOCKET`).
+
+Security notes:
+- `debug` mode must be explicitly enabled through `session.set_mode`.
+- CLI warns when the socket parent directory is world-writable (for example `/tmp`).
+
+```bash
+# generic rpc
+npm run start:cli -- rpc test.ping
+
+# session lifecycle
+npm run start:cli -- session submit-task
+npm run start:cli -- session complete-planning
+
+# tool authorization
+npm run start:cli -- tool-authorize fs.write src/app.ts
+
+# container operations
+npm run start:cli -- container state fw-sandbox-1
+npm run start:cli -- container exec fw-sandbox-1 '["echo","hello"]'
+```
 
 ## Quick Verify
 ```bash
 npm run build
 npm test
+npm run start:kernel &
+KERNEL_PID=$!
+npm run start:cli -- ping
+kill $KERNEL_PID
 ```

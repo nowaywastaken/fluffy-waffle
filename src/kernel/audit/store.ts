@@ -11,6 +11,7 @@ interface AuditRow {
   actor: string;
   detail: string;
   decision: string | null;
+  hash_v: number;
   prev_hash: string;
   hash: string;
 }
@@ -23,6 +24,7 @@ function mapRow(row: AuditRow): AuditEntry {
     action: row.action,
     actor: row.actor,
     detail: JSON.parse(row.detail) as Record<string, unknown>,
+    hash_v: row.hash_v === 2 ? 2 : 1,
     prev_hash: row.prev_hash,
     hash: row.hash,
   };
@@ -37,6 +39,12 @@ function assertWritableEntry(entry: AuditEntry): void {
   if (!entry.actor) throw new Error('AuditEntry.actor is required');
   if (!entry.prev_hash) throw new Error('AuditEntry.prev_hash is required');
   if (!entry.hash) throw new Error('AuditEntry.hash is required');
+}
+
+function hasColumn(db: DatabaseSync, table: string, column: string): boolean {
+  const stmt = db.prepare(`PRAGMA table_info(${table})`);
+  const rows = stmt.all() as Array<{ name?: string }>;
+  return rows.some(row => row.name === column);
 }
 
 export class AuditStore {
@@ -58,6 +66,7 @@ export class AuditStore {
         actor       TEXT    NOT NULL,
         detail      TEXT    NOT NULL,
         decision    TEXT,
+        hash_v      INTEGER NOT NULL DEFAULT 1,
         prev_hash   TEXT    NOT NULL,
         hash        TEXT    NOT NULL
       );
@@ -65,6 +74,13 @@ export class AuditStore {
       CREATE INDEX IF NOT EXISTS idx_audit_category ON audit_log(category);
       CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_log(timestamp);
     `);
+    this.ensureSchemaUpgrades();
+  }
+
+  private ensureSchemaUpgrades(): void {
+    if (!hasColumn(this.db, 'audit_log', 'hash_v')) {
+      this.db.exec('ALTER TABLE audit_log ADD COLUMN hash_v INTEGER NOT NULL DEFAULT 1;');
+    }
   }
 
   append(entry: AuditEntry): number {
@@ -73,9 +89,9 @@ export class AuditStore {
     if (entry.id != null) {
       const stmt = this.db.prepare(`
         INSERT INTO audit_log (
-          id, timestamp, category, action, actor, detail, decision, prev_hash, hash
+          id, timestamp, category, action, actor, detail, decision, hash_v, prev_hash, hash
         ) VALUES (
-          ?, ?, ?, ?, ?, ?, ?, ?, ?
+          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
         )
       `);
       (stmt as any).run(
@@ -86,6 +102,7 @@ export class AuditStore {
         entry.actor,
         JSON.stringify(entry.detail),
         entry.decision ?? null,
+        entry.hash_v ?? 1,
         entry.prev_hash,
         entry.hash,
       );
@@ -94,9 +111,9 @@ export class AuditStore {
 
     const stmt = this.db.prepare(`
       INSERT INTO audit_log (
-        timestamp, category, action, actor, detail, decision, prev_hash, hash
+        timestamp, category, action, actor, detail, decision, hash_v, prev_hash, hash
       ) VALUES (
-        ?, ?, ?, ?, ?, ?, ?, ?
+        ?, ?, ?, ?, ?, ?, ?, ?, ?
       )
     `);
     const result = (stmt as any).run(
@@ -106,6 +123,7 @@ export class AuditStore {
       entry.actor,
       JSON.stringify(entry.detail),
       entry.decision ?? null,
+      entry.hash_v ?? 1,
       entry.prev_hash,
       entry.hash,
     );
@@ -153,7 +171,7 @@ export class AuditStore {
     const offset = opts.offset ?? 0;
 
     const sql = `
-      SELECT id, timestamp, category, action, actor, detail, decision, prev_hash, hash
+      SELECT id, timestamp, category, action, actor, detail, decision, hash_v, prev_hash, hash
       FROM audit_log
       ${where}
       ORDER BY id DESC
@@ -167,7 +185,7 @@ export class AuditStore {
 
   getLastEntry(): AuditEntry | null {
     const stmt = this.db.prepare(`
-      SELECT id, timestamp, category, action, actor, detail, decision, prev_hash, hash
+      SELECT id, timestamp, category, action, actor, detail, decision, hash_v, prev_hash, hash
       FROM audit_log
       ORDER BY id DESC
       LIMIT 1
@@ -179,7 +197,7 @@ export class AuditStore {
   getEntryRange(fromId: number, toId: number): AuditEntry[] {
     if (toId < fromId) return [];
     const stmt = this.db.prepare(`
-      SELECT id, timestamp, category, action, actor, detail, decision, prev_hash, hash
+      SELECT id, timestamp, category, action, actor, detail, decision, hash_v, prev_hash, hash
       FROM audit_log
       WHERE id >= :fromId AND id <= :toId
       ORDER BY id ASC

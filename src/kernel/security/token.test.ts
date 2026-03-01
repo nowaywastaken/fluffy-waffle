@@ -129,4 +129,21 @@ describe('TokenIssuer', () => {
     const token2 = issuer.issue({ containerId: 'c-100', peerPid: 100, syscall: 'fs.read', pathGlob: ['src/**'] });
     assert.strictEqual(issuer.validate(token2, badCtx, Date.now()), false);
   });
+
+  it('concurrent validations cannot exceed maxOps budget', async () => {
+    const token = issuer.issue({
+      containerId: 'c-100',
+      peerPid: 100,
+      syscall: 'fs.read',
+      maxOps: 1,
+    });
+    const ctx = makeCtx({ token });
+    const now = Date.now();
+
+    const results = await Promise.all(
+      Array.from({ length: 10 }, async () => issuer.validate(token, ctx, now)),
+    );
+    const successCount = results.filter(Boolean).length;
+    assert.equal(successCount, 1);
+  });
 });

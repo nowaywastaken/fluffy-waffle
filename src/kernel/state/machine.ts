@@ -113,13 +113,15 @@ export class TddStateMachine {
     this.state.consecutive_failures += 1;
     this.state.state = 'coding';
     if (this.state.consecutive_failures >= 3) {
-      this.state.mode = 'debug';
       this.audit.log({
         category: 'lifecycle',
-        action: 'state.mode_auto_debug',
+        action: 'state.consecutive_failures_high',
         actor: 'kernel',
-        detail: { consecutive_failures: this.state.consecutive_failures },
-        decision: 'allow',
+        detail: {
+          consecutive_failures: this.state.consecutive_failures,
+          mode: this.state.mode,
+        },
+        decision: 'require_review',
       });
     }
 

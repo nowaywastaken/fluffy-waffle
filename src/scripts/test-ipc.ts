@@ -1,4 +1,5 @@
 import * as net from 'net';
+import * as path from 'node:path';
 
 // Simplified protocol handler for test client
 class ProtocolHandler {
@@ -28,7 +29,7 @@ class ProtocolHandler {
 }
 
 async function main() {
-  const socketPath = '/tmp/fluffy-kernel.sock';
+  const socketPath = process.env.FLUFFY_KERNEL_SOCKET || path.join(process.cwd(), '.fluffy', 'ipc', 'kernel.sock');
   console.log(`Testing connection to Kernel IPC at ${socketPath}...`);
 
   const client = net.createConnection(socketPath);

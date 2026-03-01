@@ -13,6 +13,7 @@ interface BootstrapConfig {
   runtime: string;
   kernelImage: string;
   workspaceDir: string;
+  ipcDir: string;
   maxRestarts: number;
 }
 
@@ -44,10 +45,15 @@ interface CliArgs {
   runtime?: string;
 }
 
+const DEFAULT_WORKSPACE_DIR = process.cwd();
+const DEFAULT_IPC_DIR = path.join(DEFAULT_WORKSPACE_DIR, '.fluffy', 'ipc');
+const KERNEL_SOCKET_IN_CONTAINER = '/run/fluffy/kernel.sock';
+
 const DEFAULT_CONFIG: BootstrapConfig = {
   runtime: process.env.CONTAINER_RUNTIME || 'auto',
   kernelImage: 'fluffy-waffle-kernel:latest',
-  workspaceDir: process.cwd(),
+  workspaceDir: DEFAULT_WORKSPACE_DIR,
+  ipcDir: process.env.FLUFFY_IPC_DIR || DEFAULT_IPC_DIR,
   maxRestarts: 3,
 };
 
@@ -58,10 +64,10 @@ const SECURITY_FLAGS = [
   '--cap-add', 'SYS_ADMIN',
 ] as const;
 
-const MOUNT_CONFIG = (workspaceDir: string) => [
-  '-v', '/var/run/docker.sock:/var/run/docker.sock:ro',
+const MOUNT_CONFIG = (workspaceDir: string, ipcDir: string) => [
+  '-v', '/var/run/docker.sock:/var/run/docker.sock',
   '-v', `${workspaceDir}:/workspace:rw`,
-  '-v', 'fluffy-ipc:/run/fluffy',
+  '-v', `${ipcDir}:/run/fluffy:rw`,
 ] as const;
 
 const NETWORK_CONFIG = [
@@ -94,7 +100,13 @@ function loadConfig(configPath?: string): BootstrapConfig {
     const parsed = parseSimpleYaml(content);
     if (parsed['runtime']) config.runtime = parsed['runtime'];
     if (parsed['kernel_image']) config.kernelImage = parsed['kernel_image'];
+    if (parsed['workspace_dir']) config.workspaceDir = path.resolve(parsed['workspace_dir']);
+    if (parsed['ipc_dir']) config.ipcDir = path.resolve(parsed['ipc_dir']);
     if (parsed['max_restarts']) config.maxRestarts = parseInt(parsed['max_restarts'], 10);
+  }
+
+  if (!config.ipcDir) {
+    config.ipcDir = path.join(config.workspaceDir, '.fluffy', 'ipc');
   }
 
   return config;
@@ -198,9 +210,10 @@ function buildStartCommand(runtime: string, config: BootstrapConfig): string[] {
     '--name', 'fluffy-waffle-kernel',
     '--rm',
     ...SECURITY_FLAGS,
-    ...MOUNT_CONFIG(config.workspaceDir),
+    ...MOUNT_CONFIG(config.workspaceDir, config.ipcDir),
     ...NETWORK_CONFIG,
     ...RESOURCE_LIMITS,
+    '-e', `FLUFFY_KERNEL_SOCKET=${KERNEL_SOCKET_IN_CONTAINER}`,
     config.kernelImage,
   ];
 }
@@ -309,7 +322,7 @@ async function monitorKernel(runtime: string, config: BootstrapConfig): Promise<
   const state: RestartState = {
     count: 0,
     timestamps: [],
-    maxRestarts: 3,
+    maxRestarts: config.maxRestarts,
     windowMs: 5 * 60 * 1000,
   };
 
@@ -318,7 +331,7 @@ async function monitorKernel(runtime: string, config: BootstrapConfig): Promise<
       await startKernel(runtime, config);
 
       await healthCheck({
-        socketPath: '/run/fluffy/kernel.sock',
+        socketPath: path.join(config.ipcDir, 'kernel.sock'),
         timeout: 30000,
         retryInterval: 1000,
       });
@@ -401,6 +414,9 @@ async function main() {
 
   const config = loadConfig(args.config);
   if (args.runtime) config.runtime = args.runtime;
+  config.workspaceDir = path.resolve(config.workspaceDir);
+  config.ipcDir = path.resolve(config.ipcDir || path.join(config.workspaceDir, '.fluffy', 'ipc'));
+  fs.mkdirSync(config.ipcDir, { recursive: true });
 
   // 1. Detect Runtime
   const runtime = detectContainerRuntime(config.runtime);
