@@ -51,6 +51,20 @@ export class TddStateMachine {
     return this.state.mode;
   }
 
+  hydrate(state: SessionState): void {
+    this.state = cloneState(state);
+    this.audit.log({
+      category: 'lifecycle',
+      action: 'state.hydrate',
+      actor: 'kernel',
+      detail: {
+        state: this.state.state,
+        mode: this.state.mode,
+      },
+      decision: 'allow',
+    });
+  }
+
   submitTask(): void {
     this.transition('idle', 'planning', 'submit_task');
   }

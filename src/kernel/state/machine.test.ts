@@ -101,4 +101,19 @@ describe('state/machine', () => {
     assert.equal(machine.isToolAllowed({ tool: 'test.run' }).allowed, false);
     assert.equal(machine.isToolAllowed({ tool: 'fs.write', target_path: 'src/a.ts' }).allowed, false);
   });
+
+  it('hydrates persisted state snapshots', () => {
+    const machine = makeMachine();
+    machine.hydrate({
+      state: 'coding',
+      mode: 'strict',
+      previous_state: 'test_running',
+      consecutive_failures: 2,
+      test_files: ['tests/foo.test.ts'],
+      last_test_passed: false,
+    });
+    const state = machine.getState();
+    assert.equal(state.state, 'coding');
+    assert.equal(state.test_files[0], 'tests/foo.test.ts');
+  });
 });
